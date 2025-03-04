@@ -67,9 +67,15 @@ from movement_primitives.dmp import CartesianDMP
 from movement_primitives.dmp._dmp import dmp_imitate, dmp_open_loop
 from movement_primitives.promp import ProMP
 
+# OpenCV
 import cv2
 from cv_bridge import CvBridge
+import mediapipe as mp
+
+# Misc
 import numpy as np
+
+# Hand Tracking
 
 class HandTracker(Node):
     def __init__(self):
@@ -78,6 +84,11 @@ class HandTracker(Node):
         # Create subscriber for images
         self.image_sub = self.create_subscription(CompressedImage, "/zed2/zed_node/left/image_rect_color/compressed", self.set_image_callback, 10)
         self.image = None
+
+        # Hand Tracking Initialization
+        self.mpHands = mp.solutions.hands
+        self.hands = self.mpHands.Hands()
+        self.mpDraw = mp.solutions.drawing_utils
 
         # GUI Intialization
         self.gui = QMainWindow()
@@ -99,7 +110,33 @@ class HandTracker(Node):
         
         if self.image is not None:
             bridge = CvBridge()
-            converted_image = np.asarray(bridge.compressed_imgmsg_to_cv2(self.image, 'rgb8'))
+            img = bridge.compressed_imgmsg_to_cv2(self.image, 'rgb8')
+
+            img = cv2.flip(img, 1)
+            imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            results = self.hands.process(imgRGB)
+
+
+            if results.multi_hand_landmarks:
+                for handLms in results.multi_hand_landmarks:
+                    for id, lm in enumerate(handLms.landmark):
+                        h, w, c = img.shape
+                        cx, cy = int(lm.x * w), int(lm.y * h)
+                        print(id, cx, cy)
+                        if id == 4 :
+                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
+                        if id == 8 :
+                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
+                        if id == 12 :
+                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
+                        if id == 16 :
+                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
+                        if id == 20 :
+                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
+
+                    self.mpDraw.draw_landmarks(img, handLms, self.mpHands.HAND_CONNECTIONS)
+
+            converted_image = np.asarray(img)
             qimage = QtGui.QImage(converted_image, converted_image.shape[1], converted_image.shape[0], QtGui.QImage.Format_RGB888)
             pixmap = QPixmap(qimage)
             pixmap = pixmap.scaled(self.window_height,self.window_width, Qt.KeepAspectRatio)
@@ -115,6 +152,9 @@ class HandTracker(Node):
         while True:
             app.processEvents()
             self.update_image_callback()
+        self.get_logger().info("QUITTING APP")
+        app.quit()
+        return
 # Main Function
 def main():
     # Initalize ROS

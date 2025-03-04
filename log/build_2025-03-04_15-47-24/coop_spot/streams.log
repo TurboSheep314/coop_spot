@@ -1,0 +1,24 @@
+[0.497s] Invoking command in '/home/aicaring/ros2_dev/src/coop_spot': PYTHONPATH=/home/aicaring/ros2_dev/src/coop_spot/build/coop_spot/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/aicaring/ros2_dev/src/coop_spot/install/coop_spot/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated setup.py egg_info --egg-base build/coop_spot build --build-base /home/aicaring/ros2_dev/src/coop_spot/build/coop_spot/build install --record /home/aicaring/ros2_dev/src/coop_spot/build/coop_spot/install.log --single-version-externally-managed install_data
+[0.688s] running egg_info
+[0.688s] writing build/coop_spot/coop_spot.egg-info/PKG-INFO
+[0.689s] writing dependency_links to build/coop_spot/coop_spot.egg-info/dependency_links.txt
+[0.689s] writing entry points to build/coop_spot/coop_spot.egg-info/entry_points.txt
+[0.689s] writing requirements to build/coop_spot/coop_spot.egg-info/requires.txt
+[0.689s] writing top-level names to build/coop_spot/coop_spot.egg-info/top_level.txt
+[0.690s] reading manifest file 'build/coop_spot/coop_spot.egg-info/SOURCES.txt'
+[0.690s] writing manifest file 'build/coop_spot/coop_spot.egg-info/SOURCES.txt'
+[0.690s] running build
+[0.690s] running build_py
+[0.690s] copying coop_spot/hand_tracker.py -> /home/aicaring/ros2_dev/src/coop_spot/build/coop_spot/build/lib/coop_spot
+[0.690s] running install
+[0.690s] running install_lib
+[0.691s] copying /home/aicaring/ros2_dev/src/coop_spot/build/coop_spot/build/lib/coop_spot/hand_tracker.py -> /home/aicaring/ros2_dev/src/coop_spot/install/coop_spot/lib/python3.10/site-packages/coop_spot
+[0.691s] byte-compiling /home/aicaring/ros2_dev/src/coop_spot/install/coop_spot/lib/python3.10/site-packages/coop_spot/hand_tracker.py to hand_tracker.cpython-310.pyc
+[0.692s] running install_data
+[0.692s] running install_egg_info
+[0.693s] removing '/home/aicaring/ros2_dev/src/coop_spot/install/coop_spot/lib/python3.10/site-packages/coop_spot-0.0.0-py3.10.egg-info' (and everything under it)
+[0.693s] Copying build/coop_spot/coop_spot.egg-info to /home/aicaring/ros2_dev/src/coop_spot/install/coop_spot/lib/python3.10/site-packages/coop_spot-0.0.0-py3.10.egg-info
+[0.694s] running install_scripts
+[0.707s] Installing hand_tracker script to /home/aicaring/ros2_dev/src/coop_spot/install/coop_spot/lib/coop_spot
+[0.707s] writing list of installed files to '/home/aicaring/ros2_dev/src/coop_spot/build/coop_spot/install.log'
+[0.721s] Invoked command in '/home/aicaring/ros2_dev/src/coop_spot' returned '0': PYTHONPATH=/home/aicaring/ros2_dev/src/coop_spot/build/coop_spot/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/aicaring/ros2_dev/src/coop_spot/install/coop_spot/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated setup.py egg_info --egg-base build/coop_spot build --build-base /home/aicaring/ros2_dev/src/coop_spot/build/coop_spot/build install --record /home/aicaring/ros2_dev/src/coop_spot/build/coop_spot/install.log --single-version-externally-managed install_data

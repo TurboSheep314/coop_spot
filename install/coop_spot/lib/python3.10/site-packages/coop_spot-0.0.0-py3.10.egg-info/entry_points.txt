@@ -1,0 +1,3 @@
+[console_scripts]
+hand_tracker = coop_spot.hand_tracker:main
+
