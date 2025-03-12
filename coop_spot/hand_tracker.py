@@ -87,18 +87,25 @@ class HandTracker(Node):
 
         # Hand Tracking Initialization
         self.mpHands = mp.solutions.hands
-        self.hands = self.mpHands.Hands()
+        self.hands = self.mpHands.Hands(min_detection_confidence = 0.3)
         self.mpDraw = mp.solutions.drawing_utils
+
+        self.prev_wrist = None
+        self.velocity = (0, 0)
+
 
         # GUI Intialization
         self.gui = QMainWindow()
         self.initGUI()
         self.gui.show()
+
     def initGUI(self):
         self.gui.setWindowTitle("Main Window")
         self.window_height = 800
         self.window_width = 800
         self.gui.resize(self.window_width, self.window_height)
+        self.qtext = QtWidgets.QLabel(self.gui)
+        self.qtext.setGeometry(QtCore.QRect(0,0, 800,200))
 
     def set_image_callback(self, msg):
         self.get_logger().info("RECEIVED IMAGE", throttle_duration_sec=3)
@@ -133,10 +140,17 @@ class HandTracker(Node):
                             cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
                         if id == 20 :
                             cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
+                        
+                        # Velocity of Wrist
+                        if id == 0: 
+                            if self.prev_wrist is not None:
+                                self.velocity = (cx - self.prev_wrist[0], cy - self.prev_wrist[1])
+                            self.prev_wrist = (cx, cy)
 
                     self.mpDraw.draw_landmarks(img, handLms, self.mpHands.HAND_CONNECTIONS)
-
+           
             converted_image = np.asarray(img)
+
             qimage = QtGui.QImage(converted_image, converted_image.shape[1], converted_image.shape[0], QtGui.QImage.Format_RGB888)
             pixmap = QPixmap(qimage)
             pixmap = pixmap.scaled(self.window_height,self.window_width, Qt.KeepAspectRatio)
@@ -144,6 +158,10 @@ class HandTracker(Node):
             label.setGeometry(QtCore.QRect(0, 0, 800,800))
             label.setPixmap(pixmap)
             label.show()
+
+            self.qtext.setText("Wrist velocity: " + ' '.join(map(str, self.velocity)))
+
+            self.qtext.show()
         else:
             self.get_logger().info("TRYING TO DISPLAY IMAGE", throttle_duration_sec=1)
 
