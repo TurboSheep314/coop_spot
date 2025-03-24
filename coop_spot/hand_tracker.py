@@ -7,6 +7,7 @@ from datetime import datetime
 from threading import Thread
 import shutil
 import json
+import math
 
 # ROS
 import rclpy
@@ -74,8 +75,11 @@ import mediapipe as mp
 
 # Misc
 import numpy as np
+from apriltag import apriltag
 
-# Hand Tracking
+
+# Data Collection
+import csv
 
 class HandTracker(Node):
     def __init__(self):
@@ -84,14 +88,15 @@ class HandTracker(Node):
         # Create subscriber for images
         self.image_sub = self.create_subscription(CompressedImage, "/zed2/zed_node/left/image_rect_color/compressed", self.set_image_callback, 10)
         self.image = None
-
+        
         # Hand Tracking Initialization
         self.mpHands = mp.solutions.hands
-        self.hands = self.mpHands.Hands(min_detection_confidence = 0.3)
+        self.hands = self.mpHands.Hands(max_num_hands = 1)
         self.mpDraw = mp.solutions.drawing_utils
 
         self.prev_wrist = None
         self.velocity = (0, 0)
+        self.closest_apriltag = (0,math.inf)
 
 
         # GUI Intialization
@@ -104,26 +109,73 @@ class HandTracker(Node):
         self.window_height = 800
         self.window_width = 800
         self.gui.resize(self.window_width, self.window_height)
-        self.qtext = QtWidgets.QLabel(self.gui)
-        self.qtext.setGeometry(QtCore.QRect(0,0, 800,200))
+        self.veltext = QtWidgets.QLabel(self.gui)
+        self.veltext.setGeometry(QtCore.QRect(0,0, 400,200))
+        self.proxtext = QtWidgets.QLabel(self.gui)
+        self.proxtext.setGeometry(QtCore.QRect(400,0, 800,200))
 
     def set_image_callback(self, msg):
         self.get_logger().info("RECEIVED IMAGE", throttle_duration_sec=3)
         self.image = msg
-    
-    def update_image_callback(self):
 
+    def detect_fiducials_in_image(self):
+            bridge = CvBridge()
+            img = bridge.compressed_imgmsg_to_cv2(self.image, 'rgb8')
+            # Convert image data from RGB to Greyscale
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+            # Create apriltag detector
+            detector = apriltag(family="tag36h11")
+
+            # Get detections on greyscale image
+            detections = detector.detect(img)
+
+            bboxes = []
+            for i in range(len(detections)):
+                # Get bounding box for current detection
+                bbox = detections[i]["lb-rb-rt-lt"]
+                bbox_id = detections[i]["id"]
+                
+                # Add current detection to list of bounding boxes
+                bboxes.append((bbox_id, bbox))
+
+            # Return list of bounding boxes for given image
+            return bboxes
+
+    def hypotenuse(self, p1, p2):
+        return math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+
+    def update_image_callback(self):
         self.get_logger().info("Running image callback", throttle_duration_sec=3)
         
         if self.image is not None:
             bridge = CvBridge()
             img = bridge.compressed_imgmsg_to_cv2(self.image, 'rgb8')
 
+            # Detect fiducials in image (april tags)
+            bboxes = self.detect_fiducials_in_image()
+
+            # Draw apreil tag locations
+            if bboxes:
+                i = 0
+                for ea in bboxes:
+                    coords = ea[1]
+                    while i < len(coords):
+                        cx, cy = int(coords[i][0]), int(coords[i][1])
+                        cx2, cy2 = int(coords[(i+1)%len(coords)][0]), int(coords[(i+1)%len(coords)][1])
+
+                        cv2.line(img, (cx, cy), (cx2, cy2), (255, 255, 0), 5)
+                        i += 1
+                    i = 0
+
+
+            # Prepare image for Handtracking
             img = cv2.flip(img, 1)
             imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+            # Hand Tracking
+            wristlm = 0
             results = self.hands.process(imgRGB)
-
-
             if results.multi_hand_landmarks:
                 for handLms in results.multi_hand_landmarks:
                     for id, lm in enumerate(handLms.landmark):
@@ -143,12 +195,41 @@ class HandTracker(Node):
                         
                         # Velocity of Wrist
                         if id == 0: 
+                            wristlm = lm
                             if self.prev_wrist is not None:
                                 self.velocity = (cx - self.prev_wrist[0], cy - self.prev_wrist[1])
                             self.prev_wrist = (cx, cy)
 
                     self.mpDraw.draw_landmarks(img, handLms, self.mpHands.HAND_CONNECTIONS)
            
+                if bboxes:
+                    # Reset closest apriltag for current check
+                    self.closest_apriltag = (0, math.inf)
+                    h, w, c = img.shape
+                    handcx, handcy = int(wristlm.x * w), int(wristlm.y * h)
+                    cv2.circle(img, (handcx, handcy), 10, (0, 0, 255), cv2.FILLED)
+                    
+                    i = 0
+                    # need to flip for accurate april tag coords
+                    for ea in bboxes:
+                        coords = ea[1]
+                        avg_cx, avg_cy = 0, 0
+                        while i < len(coords):
+                            cx, cy = int(w - coords[i][0] - 1), int(coords[i][1])
+                            avg_cx += cx
+                            avg_cy += cy
+                            i += 1
+                        avg_cx = int(avg_cx/len(coords))
+                        avg_cy = int(avg_cy/len(coords))
+                        cv2.line(img, (avg_cx, avg_cy), (handcx, handcy), (255, 0, 0), 5)
+
+                        dist = self.hypotenuse((avg_cx, avg_cy), (handcx, handcy))
+
+                        if dist < self.closest_apriltag[1]:
+                            self.closest_apriltag = (ea[0], dist)
+                        i = 0
+
+
             converted_image = np.asarray(img)
 
             qimage = QtGui.QImage(converted_image, converted_image.shape[1], converted_image.shape[0], QtGui.QImage.Format_RGB888)
@@ -159,9 +240,11 @@ class HandTracker(Node):
             label.setPixmap(pixmap)
             label.show()
 
-            self.qtext.setText("Wrist velocity: " + ' '.join(map(str, self.velocity)))
+            self.veltext.setText("Wrist velocity: " + ' '.join(map(str, self.velocity)))
+            self.proxtext.setText("Closest Apriltag: " + ' '.join(map(str, self.closest_apriltag)))
 
-            self.qtext.show()
+            self.veltext.show()
+            self.proxtext.show()
         else:
             self.get_logger().info("TRYING TO DISPLAY IMAGE", throttle_duration_sec=1)
 

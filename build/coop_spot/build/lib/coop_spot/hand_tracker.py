@@ -74,8 +74,8 @@ import mediapipe as mp
 
 # Misc
 import numpy as np
+from apriltag import apriltag
 
-# Hand Tracking
 
 class HandTracker(Node):
     def __init__(self):
@@ -84,10 +84,10 @@ class HandTracker(Node):
         # Create subscriber for images
         self.image_sub = self.create_subscription(CompressedImage, "/zed2/zed_node/left/image_rect_color/compressed", self.set_image_callback, 10)
         self.image = None
-
+        
         # Hand Tracking Initialization
         self.mpHands = mp.solutions.hands
-        self.hands = self.mpHands.Hands(min_detection_confidence = 0.3)
+        self.hands = self.mpHands.Hands(max_num_hands = 1)
         self.mpDraw = mp.solutions.drawing_utils
 
         self.prev_wrist = None
@@ -110,20 +110,62 @@ class HandTracker(Node):
     def set_image_callback(self, msg):
         self.get_logger().info("RECEIVED IMAGE", throttle_duration_sec=3)
         self.image = msg
-    
-    def update_image_callback(self):
 
+    def detect_fiducials_in_image(self):
+            bridge = CvBridge()
+            img = bridge.compressed_imgmsg_to_cv2(self.image, 'rgb8')
+            # Convert image data from RGB to Greyscale
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+            # Create apriltag detector
+            detector = apriltag(family="tag36h11")
+
+            # Get detections on greyscale image
+            detections = detector.detect(img)
+
+            bboxes = []
+            for i in range(len(detections)):
+                # Get bounding box for current detection
+                bbox = detections[i]["lb-rb-rt-lt"]
+                bbox_id = detections[i]["id"]
+                
+                # Add current detection to list of bounding boxes
+                bboxes.append((bbox_id, bbox))
+
+            # Return list of bounding boxes for given image
+            return bboxes
+
+    def update_image_callback(self):
         self.get_logger().info("Running image callback", throttle_duration_sec=3)
         
         if self.image is not None:
             bridge = CvBridge()
             img = bridge.compressed_imgmsg_to_cv2(self.image, 'rgb8')
 
+            # Detect fiducials in image (april tags)
+            bboxes = self.detect_fiducials_in_image()
+
+            # Draw apreil tag locations
+            if bboxes:
+                i = 0
+                for ea in bboxes:
+                    coords = ea[1]
+                    while i < len(coords):
+                        h, w, c = img.shape
+                        cx, cy = int(coords[i][0]), int(coords[i][1])
+                        cx2, cy2 = int(coords[(i+1)%len(coords)][0]), int(coords[(i+1)%len(coords)][1])
+
+                        cv2.line(img, (cx, cy), (cx2, cy2), (255, 255, 0), 5)
+                        i += 1
+                    i = 0
+
+
+            # Prepare image for Handtracking
             img = cv2.flip(img, 1)
             imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            wristlm = 0
+            # Hand Tracking
             results = self.hands.process(imgRGB)
-
-
             if results.multi_hand_landmarks:
                 for handLms in results.multi_hand_landmarks:
                     for id, lm in enumerate(handLms.landmark):
@@ -135,7 +177,7 @@ class HandTracker(Node):
                         if id == 8 :
                             cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
                         if id == 12 :
-                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
+                            cv2.circle(img, (cx, cy), 15, (0, 0, 255), cv2.FILLED)
                         if id == 16 :
                             cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
                         if id == 20 :
@@ -143,12 +185,19 @@ class HandTracker(Node):
                         
                         # Velocity of Wrist
                         if id == 0: 
+                            wristlm = lm
                             if self.prev_wrist is not None:
                                 self.velocity = (cx - self.prev_wrist[0], cy - self.prev_wrist[1])
                             self.prev_wrist = (cx, cy)
 
                     self.mpDraw.draw_landmarks(img, handLms, self.mpHands.HAND_CONNECTIONS)
            
+                if bboxes:
+                    self.get_logger().info("hihihihellohi")
+                    h, w, c = img.shape
+                    handcx, handcy = int(wristlm.x * w), int(wristlm.y * h)
+                    cv2.circle(img, (handcx, handcy), 35, (255, 0, 255), cv2.FILLED)
+
             converted_image = np.asarray(img)
 
             qimage = QtGui.QImage(converted_image, converted_image.shape[1], converted_image.shape[0], QtGui.QImage.Format_RGB888)
