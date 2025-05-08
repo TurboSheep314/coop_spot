@@ -124,6 +124,8 @@ class RobotController(Node):
             (src.image_type == image_pb2.ImageSource.IMAGE_TYPE_VISUAL and 'depth' not in src.name)
         ]
 
+        self.timer = self.create_timer(.05, self.run)
+
     @property
     def robot_state(self):
         """Get latest robot state proto."""
@@ -150,30 +152,27 @@ class RobotController(Node):
 
     def run(self):
         """Primary method that is called."""
-        self.get_logger().info("Attempt running")
-        while self._attempts <= self._max_attempts:
-            detected_fiducial = False
-            fiducial_rt_world = None
+        self.get_logger().info("Attempt running", throttle_duration_sec=3)
+        detected_fiducial = False
+        fiducial_rt_world = None
 
-            # Detect the april tag in the images from Spot using the apriltag library.
-            bboxes, source_name = self.image_to_bounding_box()
-            if bboxes:
-                self._previous_source = source_name
-                (tvec, _, source_name) = self.pixel_coords_to_camera_coords(
-                    bboxes, self._intrinsics, source_name)
-                vision_tform_fiducial_position = self.compute_fiducial_in_world_frame(tvec)
-                fiducial_rt_world = geometry_pb2.Vec3(x=vision_tform_fiducial_position[0],
-                                                        y=vision_tform_fiducial_position[1],
-                                                        z=vision_tform_fiducial_position[2])
-                detected_fiducial = True
-            self.get_logger().info("Fiducal found: " + detected_fiducial)
-            if detected_fiducial:
-                # Go to the tag and stop within a certain distance
-                self.go_to_tag(fiducial_rt_world)
-            else:
-                self.get_logger().info('No fiducials found')
-
-            self._attempts += 1  #increment attempts at finding a fiducial
+        # Detect the april tag in the images from Spot using the apriltag library.
+        bboxes, source_name = self.image_to_bounding_box()
+        if bboxes:
+            self._previous_source = source_name
+            (tvec, _, source_name) = self.pixel_coords_to_camera_coords(
+                bboxes, self._intrinsics, source_name)
+            vision_tform_fiducial_position = self.compute_fiducial_in_world_frame(tvec)
+            fiducial_rt_world = geometry_pb2.Vec3(x=vision_tform_fiducial_position[0],
+                                                    y=vision_tform_fiducial_position[1],
+                                                    z=vision_tform_fiducial_position[2])
+            detected_fiducial = True
+        if detected_fiducial:
+            # Go to the tag and stop within a certain distance
+            #self.go_to_tag(fiducial_rt_world)
+            self.get_logger().info("Fiducial found!", throttle_duration_sec=3)
+        else:
+            self.get_logger().info('No fiducials found', throttle_duration_sec=3)
 
         # Power off at the conclusion of the example.
         if self._powered_on:
@@ -566,238 +565,28 @@ class RobotController(Node):
         blocking_stand(self._robot_command_client)
 
         self.get_logger().info("Done with robot setup.")
-    
-
-class HandTracker(Node): # Rename to something better (This Node is all about the Camera)
-    """ 
-    Contrary to the name, this node is for anything to do from the ZED Camera. 
-    
-    Primary purpose is to determine human intention. Currently has a messy handtracking
-    solution and solid april tag detection. The goal is to determine what the human is
-    reaching for, if we have two objects, A and B, and the human hand seems to be 
-    approaching the april tag for object A, we can assume that the human's intention 
-    is to pick up Object A.
-    """
-    def __init__(self):
-        super().__init__("hand_tracker")
-
-        # Create subscriber for images
-        self.image_sub = self.create_subscription(CompressedImage, "/zed2/zed_node/left/image_rect_color/compressed", self.set_image_callback, 10)
-        self.image = None
-        
-        # Hand Tracking Initialization
-        self.mpHands = mp.solutions.hands
-        self.hands = self.mpHands.Hands(max_num_hands = 1, min_detection_confidence = .3)
-        self.mpDraw = mp.solutions.drawing_utils
-
-        # Data Initialization
-        self.prev_wrist = None
-        self.velocity = (0, 0)
-        self.closest_apriltag = (-1,math.inf)
-
-        # Data Collection
-        csvfile = open('data.csv', 'w', newline='')
-        self.writer = csv.writer(csvfile, delimiter=' ', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-        self.writer.writerow(['Velocity X'] + ['Velocity Y'] + ['Closest Apriltag ID'] + ['Distance between Hand and Apriltag'])
-        # GUI Intialization
-        self.gui = QMainWindow()
-        self.initGUI()
-        self.gui.show()
-
-    def initGUI(self):
-        """Initializes basic GUI elements"""
-        self.gui.setWindowTitle("Main Window")
-        self.window_height = 800
-        self.window_width = 800
-        self.gui.resize(self.window_width, self.window_height)
-        self.veltext = QtWidgets.QLabel(self.gui)
-        self.veltext.setGeometry(QtCore.QRect(0,0, 400,200))
-        self.proxtext = QtWidgets.QLabel(self.gui)
-        self.proxtext.setGeometry(QtCore.QRect(400,0, 800,200))
-
-    def set_image_callback(self, msg):
-        """Callback for each new image captured by ZED Camera"""
-        self.get_logger().info("RECEIVED IMAGE", throttle_duration_sec=3)
-        self.image = msg
-
-    def detect_fiducials_in_image(self):
-        """Detects all apriltags from image and returns their bounding boxes"""
-        bridge = CvBridge()
-        img = bridge.compressed_imgmsg_to_cv2(self.image, 'rgb8')
-        # Convert image data from RGB to Greyscale
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) # required for april tag detection
-
-        # Create apriltag detector
-        detector = apriltag(family="tag36h11") # tag36h11 is the family of tags we use
-
-        # Get detections on greyscale image
-        detections = detector.detect(img)
-
-        bboxes = []
-        for i in range(len(detections)):
-            # Get bounding box for current detection
-            bbox = detections[i]["lb-rb-rt-lt"]
-            bbox_id = detections[i]["id"]
-            
-            # Add current detection to list of bounding boxes
-            bboxes.append((bbox_id, bbox))
-
-        # Return list of bounding boxes for given image
-        return bboxes
-
-    def hypotenuse(self, p1, p2):
-        """Calculates the hypotenuse between two points in 2d space."""
-        return math.hypot(p2[0] - p1[0], p2[1] - p1[1])
-
-    def update_image_callback(self):
-        """Method is called continuously from a loop, visualizes hand tracking and april tag data"""
-        self.get_logger().info("Running image callback", throttle_duration_sec=3)
-        
-        if self.image is not None:
-            bridge = CvBridge()
-            img = bridge.compressed_imgmsg_to_cv2(self.image, 'rgb8')
-
-            # Detect fiducials in image (april tags)
-            bboxes = self.detect_fiducials_in_image()
-
-            # Draw april tag locations
-            if bboxes:
-                i = 0
-                for ea in bboxes:
-                    coords = ea[1]
-                    while i < len(coords):
-                        cx, cy = int(coords[i][0]), int(coords[i][1])
-                        cx2, cy2 = int(coords[(i+1)%len(coords)][0]), int(coords[(i+1)%len(coords)][1])
-
-                        cv2.line(img, (cx, cy), (cx2, cy2), (255, 255, 0), 5)
-                        i += 1
-                    i = 0
-
-
-            # Prepare image for Handtracking
-            img = cv2.flip(img, 1)                        # For handtracking, the image must be flipped
-            imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # and in RGB
-
-            # Hand Tracking (Copied from mediapipe documentation, except for velocity)
-            wristlm = 0
-            results = self.hands.process(imgRGB)
-
-            if results.multi_hand_landmarks:
-                for handLms in results.multi_hand_landmarks:
-                    for id, lm in enumerate(handLms.landmark):
-                        h, w, c = img.shape
-                        cx, cy = int(lm.x * w), int(lm.y * h)
-                        print(id, cx, cy)
-                        if id == 4 :
-                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
-                        if id == 8 :
-                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
-                        if id == 12 :
-                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
-                        if id == 16 :
-                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
-                        if id == 20 :
-                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
-                        
-                        # Velocity of Wrist
-                        if id == 0: 
-                            wristlm = lm
-                            if self.prev_wrist is not None: # Number of images per second is 15, will make it more accurate in the future, but this is consistent for the first couple minutes of the cameras
-                                self.velocity = ((cx - self.prev_wrist[0])/15, (cy - self.prev_wrist[1])/15)
-                            self.prev_wrist = (cx, cy)
-
-                    self.mpDraw.draw_landmarks(img, handLms, self.mpHands.HAND_CONNECTIONS)
-
-                # Draw distance markers + Calculate closest april tag
-                if bboxes:
-                    # Reset closest apriltag for current check
-                    self.closest_apriltag = (-1, math.inf)
-                    h, w, c = img.shape
-                    handcx, handcy = int(wristlm.x * w), int(wristlm.y * h) # Converts positional data to the (x,y) of the image.
-                    cv2.circle(img, (handcx, handcy), 10, (0, 0, 255), cv2.FILLED)
-                    
-                    i = 0
-                    for ea in bboxes: # For each april tag
-                        # ea[0] is the ID of the april tag
-                        # ea[1] is the corners of the april tag's bounding box
-                        
-                        coords = ea[1]
-                        avg_cx, avg_cy = 0, 0
-                        # Adds each corner together and averages it, resulting in a point at the center of the april tag. 
-                        while i < len(coords):
-                            cx, cy = int(w - coords[i][0] - 1), int(coords[i][1])
-                            avg_cx += cx
-                            avg_cy += cy
-                            i += 1
-                        avg_cx = int(avg_cx/len(coords))
-                        avg_cy = int(avg_cy/len(coords))
-
-                        # Draws a line from wrist to april tag.
-                        cv2.line(img, (avg_cx, avg_cy), (handcx, handcy), (255, 0, 0), 5)
-
-                        # Distance is the wrist to the center of april tag
-                        dist = self.hypotenuse((avg_cx, avg_cy), (handcx, handcy))
-
-                        if dist < self.closest_apriltag[1]:
-                            self.closest_apriltag = (ea[0], dist)
-                        i = 0
-
-                # Data Collection
-                self.writer.writerow(list(map(str, self.velocity)) + list(map(str, self.closest_apriltag)))
-                    
-
-            converted_image = np.asarray(img)
-
-            qimage = QtGui.QImage(converted_image, converted_image.shape[1], converted_image.shape[0], QtGui.QImage.Format_RGB888)
-            pixmap = QPixmap(qimage)
-            pixmap = pixmap.scaled(self.window_height,self.window_width, Qt.KeepAspectRatio)
-            label = QtWidgets.QLabel(self.gui)
-            label.setGeometry(QtCore.QRect(0, 0, 800,800))
-            label.setPixmap(pixmap)
-            label.show()
-
-            self.veltext.setText("Wrist velocity: " + ' '.join(map(str, self.velocity)))
-            self.proxtext.setText("Closest Apriltag: " + ' '.join(map(str, self.closest_apriltag)))
-            
-            self.veltext.show()
-            self.proxtext.show()
-        else:
-            self.get_logger().info("TRYING TO DISPLAY IMAGE", throttle_duration_sec=1)
-
-    def run(self, app):
-        """Primary method, called from main function"""
-        while True:
-            app.processEvents()
-            self.update_image_callback()
-        self.get_logger().info("QUITTING APP")
-        app.quit()
-        return
 
 # Main Function
 def main():
-    # Initalize ROS
+        # Initalize ROS
     rclpy.init()
 
     app = QApplication(sys.argv)
 
-    hand_tracker = HandTracker()
     robot_controller = RobotController()
 
     executor = MultiThreadedExecutor()
-    executor.add_node(hand_tracker)
     executor.add_node(robot_controller)
 
     thread = Thread(target=executor.spin)
     thread.start()
 
     try:
-        hand_tracker.run(app)
         robot_controller.run()
     except KeyboardInterrupt:
         print("Keyboard Interrupt called!")
     finally:
         executor.shutdown()
-
 
 if __name__ == "__main__":
     main()

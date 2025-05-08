@@ -23,7 +23,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            "hand_tracker = coop_spot.hand_tracker:main",
+            "camera_controller = coop_spot.camera_controller:main",
+            "robot_controller = coop_spot.robot_controller:main"
         ],
     },
 )

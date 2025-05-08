@@ -1,0 +1,326 @@
+# System
+import time
+import sys
+import os
+import glob
+from datetime import datetime
+from threading import Thread
+import shutil
+import json
+import math
+
+# ROS
+import rclpy
+from rclpy.node import Node
+from rclpy.action import ActionClient
+from geometry_msgs.msg import TransformStamped, Transform, Vector3, Quaternion, PoseStamped, Pose, Point, PoseArray
+from std_msgs.msg import Header, Bool, String, Int32
+from sensor_msgs.msg import Image, CompressedImage, JointState, Joy
+from builtin_interfaces.msg import Time
+from tf2_msgs.msg import TFMessage
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
+from rclpy.executors import MultiThreadedExecutor
+from transforms3d.euler import quat2euler
+from transforms3d.quaternions import mat2quat
+from nav_msgs.msg import Path
+from transforms3d.euler import quat2euler, euler2quat
+from custom_actions.action import Gripper, GraspObject, ArmTagPose, SendPose, SendJointPose, SendBool
+
+# rosbags
+from rosbags.rosbag2 import Writer, Reader
+from rosbags.serde import serialize_cdr, deserialize_cdr
+from rosbags.typesys.types import geometry_msgs__msg__TransformStamped as rbTransformStamped
+from rosbags.typesys.types import geometry_msgs__msg__Transform as rbTransform
+from rosbags.typesys.types import geometry_msgs__msg__Vector3 as rbVector3
+from rosbags.typesys.types import geometry_msgs__msg__Quaternion as rbQuaternion
+from rosbags.typesys.types import std_msgs__msg__Header as rbHeader
+from rosbags.typesys.types import builtin_interfaces__msg__Time as rbTime
+
+# Boston Dynamics
+from bosdyn import geometry
+from bosdyn.api import geometry_pb2, image_pb2, trajectory_pb2, world_object_pb2, arm_command_pb2, robot_command_pb2, synchronized_command_pb2, gripper_command_pb2, arm_surface_contact_pb2, arm_surface_contact_service_pb2
+from bosdyn.api.geometry_pb2 import SE2Velocity, SE2VelocityLimit, Vec2
+from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
+from bosdyn.client import create_standard_sdk
+from bosdyn.client.lease import LeaseClient, LeaseKeepAlive
+from bosdyn.client.robot_id import RobotIdClient
+from bosdyn.client.power import PowerClient
+from bosdyn.client.image import ImageClient, build_image_request
+from bosdyn.client.robot_state import RobotStateClient
+from bosdyn.client.robot_command import RobotCommandClient, RobotCommandBuilder, blocking_stand, blocking_sit, block_until_arm_arrives, CommandFailedError
+from bosdyn.client.world_object import WorldObjectClient
+from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b, get_vision_tform_body, get_odom_tform_body, GRAV_ALIGNED_BODY_FRAME_NAME, ODOM_FRAME_NAME, HAND_FRAME_NAME, add_edge_to_tree
+from bosdyn.client.math_helpers import SE3Pose, Quat, quat_to_eulerZYX, SE2Pose
+import bosdyn.client.util
+from bosdyn.util import seconds_to_duration
+from bosdyn.client.docking import DockingClient, blocking_dock_robot, blocking_undock, get_dock_id
+from bosdyn.client.arm_surface_contact import ArmSurfaceContactClient
+
+# Spot Driver
+from spot_msgs.msg import BatteryStateArray
+
+# PyQt5
+import PyQt5
+from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtWidgets
+from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget, QFileDialog, QGridLayout,QTabWidget,QFileDialog
+from PyQt5.QtGui import QPixmap
+from PyQt5 import QtGui, QtCore
+from PyQt5.QtGui import QCursor,QImage, QPalette, QBrush
+from PyQt5.QtCore import QSize
+from PyQt5.QtCore import *
+from PyQt5.QtGui import *
+from PyQt5.QtWidgets import *
+from PyQt5.QtWidgets import QTableWidgetItem
+
+
+# Cartesian DMP
+import pytransform3d.visualizer as pv
+import pytransform3d.rotations as pr
+import pytransform3d.transformations as pt
+import pytransform3d.trajectories as ptr
+from movement_primitives.dmp import CartesianDMP
+from movement_primitives.dmp._dmp import dmp_imitate, dmp_open_loop
+from movement_primitives.promp import ProMP
+
+# OpenCV
+import cv2
+from cv_bridge import CvBridge
+import mediapipe as mp
+
+# Misc
+import numpy as np
+from apriltag import apriltag
+from PIL import Image
+
+
+# Data Collection
+import csv 
+
+class CameraNode(Node): # Could use a rename, but not sure to what. It doesn't control the camera, but it does a lot of different stuff with it. Not important to rename, just a thought.
+    """ 
+    This node is for anything to do from the ZED Camera. 
+    
+    Primary purpose is to determine human intention. Currently has a messy handtracking
+    solution and solid april tag detection. The goal is to determine what the human is
+    reaching for, if we have two objects, A and B, and the human hand seems to be 
+    approaching the april tag for object A, we can assume that the human's intention 
+    is to pick up Object A.
+    """
+    def __init__(self):
+        super().__init__("camera_node")
+
+        # Create subscriber for images
+        self.image_sub = self.create_subscription(CompressedImage, "/zed2/zed_node/left/image_rect_color/compressed", self.set_image_callback, 10)
+        self.image = None
+        
+        # Hand Tracking Initialization
+        self.mpHands = mp.solutions.hands
+        self.hands = self.mpHands.Hands(max_num_hands = 1, min_detection_confidence = .3)
+        self.mpDraw = mp.solutions.drawing_utils
+
+        self.bboxes = dict() # For storing the bounding boxes of all seen april tags
+
+        # Data Initialization
+        self.prev_wrist = None
+        self.velocity = (0, 0)
+        self.closest_apriltag = (-1,math.inf)
+
+        # Data Collection
+        csvfile = open('data.csv', 'w', newline='')
+        self.writer = csv.writer(csvfile, delimiter=' ', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+        self.writer.writerow(['Velocity X'] + ['Velocity Y'] + ['Closest Apriltag ID'] + ['Distance between Hand and Apriltag'])
+
+        # GUI Intialization
+        self.gui = QMainWindow()
+        self.initGUI()
+        self.gui.show()
+
+    def initGUI(self):
+        """Initializes basic GUI elements"""
+        self.gui.setWindowTitle("Main Window")
+        self.window_height = 800
+        self.window_width = 800
+        self.gui.resize(self.window_width, self.window_height)
+        self.veltext = QtWidgets.QLabel(self.gui)
+        self.veltext.setGeometry(QtCore.QRect(0,0, 400,200))
+        self.proxtext = QtWidgets.QLabel(self.gui)
+        self.proxtext.setGeometry(QtCore.QRect(400,0, 800,200))
+
+    def set_image_callback(self, msg):
+        """Callback for each new image captured by ZED Camera"""
+        self.get_logger().info("RECEIVED IMAGE", throttle_duration_sec=3)
+        self.image = msg
+
+    def detect_fiducials_in_image(self):
+        """Detects all apriltags from image and returns their bounding boxes"""
+        bridge = CvBridge()
+        img = bridge.compressed_imgmsg_to_cv2(self.image, 'rgb8')
+        # Convert image data from RGB to Greyscale
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) # required for april tag detection
+
+        # Create apriltag detector
+        detector = apriltag(family="tag36h11") # tag36h11 is the family of tags we use
+
+        # Get detections on greyscale image
+        detections = detector.detect(img)
+
+        for i in range(len(detections)):
+            # Get bounding box for current detection
+            bbox = detections[i]["lb-rb-rt-lt"]
+            bbox_id = detections[i]["id"]
+            
+            # Add current detection to dictionary of april tag bounding boxes
+            self.bboxes[bbox_id] = bbox
+
+
+    def hypotenuse(self, p1, p2):
+        """Calculates the hypotenuse between two points in 2d space."""
+        return math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+
+    def update_image_callback(self):
+        """Method is called continuously from a loop, visualizes hand tracking and april tag data"""
+        self.get_logger().info("Running image callback", throttle_duration_sec=3)
+        
+        if self.image is not None:
+            bridge = CvBridge()
+            img = bridge.compressed_imgmsg_to_cv2(self.image, 'rgb8')
+
+            # Detect fiducials in image (april tags)
+            self.detect_fiducials_in_image()
+            # Draw april tag locations
+            if self.bboxes:
+                i = 0
+                for coords in self.bboxes.values():
+                    while i < len(coords):
+                        cx, cy = int(coords[i][0]), int(coords[i][1])
+                        cx2, cy2 = int(coords[(i+1)%len(coords)][0]), int(coords[(i+1)%len(coords)][1])
+
+                        cv2.line(img, (cx, cy), (cx2, cy2), (255, 255, 0), 5)
+                        i += 1
+                    i = 0
+
+
+            # Prepare image for Handtracking
+            img = cv2.flip(img, 1)                        # For handtracking, the image must be flipped
+            imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # and in RGB
+
+            # Hand Tracking (Copied from mediapipe documentation, except for velocity)
+            wristlm = 0
+            results = self.hands.process(imgRGB)
+
+            if results.multi_hand_landmarks:
+                for handLms in results.multi_hand_landmarks:
+                    for id, lm in enumerate(handLms.landmark):
+                        h, w, c = img.shape
+                        cx, cy = int(lm.x * w), int(lm.y * h)
+                        print(id, cx, cy)
+                        if id == 4 :
+                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
+                        if id == 8 :
+                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
+                        if id == 12 :
+                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
+                        if id == 16 :
+                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
+                        if id == 20 :
+                            cv2.circle(img, (cx, cy), 15, (255, 0, 255), cv2.FILLED)
+                        
+                        # Velocity of Wrist
+                        if id == 0: 
+                            wristlm = lm
+                            if self.prev_wrist is not None: # Number of images per second is 15, will make it more accurate in the future, but this is consistent for the first couple minutes of the cameras
+                                self.velocity = ((cx - self.prev_wrist[0])/15, (cy - self.prev_wrist[1])/15)
+                            self.prev_wrist = (cx, cy)
+
+                    self.mpDraw.draw_landmarks(img, handLms, self.mpHands.HAND_CONNECTIONS)
+
+                # Draw distance markers + Calculate closest april tag
+                if self.bboxes:
+                    # Reset closest apriltag for current check
+                    self.closest_apriltag = (-1, math.inf)
+                    h, w, c = img.shape
+                    handcx, handcy = int(wristlm.x * w), int(wristlm.y * h) # Converts positional data to the (x,y) of the image.
+                    cv2.circle(img, (handcx, handcy), 10, (0, 0, 255), cv2.FILLED)
+                    
+                    i = 0
+                    for id, coords in self.bboxes.items(): # For each april tag
+                        # id is the ID of the april tag
+                        # coords is the corners of the april tag's bounding box
+
+                        avg_cx, avg_cy = 0, 0
+                        # Adds each corner together and averages it, resulting in a point at the center of the april tag. 
+                        while i < len(coords):
+                            cx, cy = int(w - coords[i][0] - 1), int(coords[i][1])
+                            avg_cx += cx
+                            avg_cy += cy
+                            i += 1
+                        avg_cx = int(avg_cx/len(coords))
+                        avg_cy = int(avg_cy/len(coords))
+
+                        # Draws a line from wrist to april tag.
+                        cv2.line(img, (avg_cx, avg_cy), (handcx, handcy), (255, 0, 0), 5)
+
+                        # Distance is the wrist to the center of april tag
+                        dist = self.hypotenuse((avg_cx, avg_cy), (handcx, handcy))
+
+                        if dist < self.closest_apriltag[1]:
+                            self.closest_apriltag = (id, dist)
+                        i = 0
+
+                # Data Collection
+                self.writer.writerow(list(map(str, self.velocity)) + list(map(str, self.closest_apriltag)))
+                    
+
+            converted_image = np.asarray(img)
+
+            qimage = QtGui.QImage(converted_image, converted_image.shape[1], converted_image.shape[0], QtGui.QImage.Format_RGB888)
+            pixmap = QPixmap(qimage)
+            pixmap = pixmap.scaled(self.window_height,self.window_width, Qt.KeepAspectRatio)
+            label = QtWidgets.QLabel(self.gui)
+            label.setGeometry(QtCore.QRect(0, 0, 800,800))
+            label.setPixmap(pixmap)
+            label.show()
+
+            self.veltext.setText("Wrist velocity: " + ' '.join(map(str, self.velocity)))
+            self.proxtext.setText("Closest Apriltag: " + ' '.join(map(str, self.closest_apriltag)))
+            
+            self.veltext.show()
+            self.proxtext.show()
+        else:
+            self.get_logger().info("TRYING TO DISPLAY IMAGE", throttle_duration_sec=1)
+
+    def run(self, app):
+        """Primary method, called from main function"""
+        while True:
+            app.processEvents()
+            self.update_image_callback()
+        self.get_logger().info("QUITTING APP")
+        app.quit()
+        return
+
+# Main Function
+def main():
+    # Initalize ROS    # Initalize ROS
+    rclpy.init()
+
+    app = QApplication(sys.argv)
+
+    camera_node = CameraNode()
+
+    executor = MultiThreadedExecutor()
+    executor.add_node(camera_node)
+
+    thread = Thread(target=executor.spin)
+    thread.start()
+
+    try:
+        camera_node.run(app)
+    except KeyboardInterrupt:
+        print("Keyboard Interrupt called!")
+    finally:
+        executor.shutdown()
+
+if __name__ == "__main__":
+    main()

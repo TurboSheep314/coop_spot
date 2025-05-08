@@ -9,7 +9,11 @@ def generate_launch_description():
     return LaunchDescription([
         Node(
             package="coop_spot",
-            executable="hand_tracker"
+            executable="camera_controller"
+        ),
+        Node(
+            package="coop_spot",
+            executable="robot_controller"
         ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
