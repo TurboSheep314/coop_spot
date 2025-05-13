@@ -3,7 +3,7 @@ The goal of this project is to work cooperatively with the Boston Dynamics Spot 
 
 For example, if we had a box of cereal, a bowl, milk, and a spoon on a table, we want to work with Spot to make a bowl of cereal, if a human reaches for the cereal, Spot can identify the human's intention and decide what the next best course of action should be, in this instance, he should grab a bowl so we have something to pour the cereal into.
 
-# Roadmap (Not in order)
+## Roadmap (Not in order)
 ### Completed
 - [x] Hand Tracking
 - [x] Calculating velocity of hand
@@ -18,3 +18,16 @@ For example, if we had a box of cereal, a bowl, milk, and a spoon on a table, we
 - [ ] LFD Training
 - [ ] Cue Generation
 - [ ] Strategy Model
+
+## How-to
+Open the command prompt
+Change directory to ~/ros2_dev
+Type `source ~/ros2_dev/install/setup.bash`
+
+To launch the program type `ros2 launch coop_spot coop_spot.launch.py`
+
+If you make edits to the program, type `colcon build --packages-select coop_spot` to update it for launch
+
+We use github for version control, if you want to make a commit, change the directory to ~/ros2_dev/src/coop_spot, type "git commit", type your commit message, then type :wq to save and quit.
+
+To push the commits, type "git push coop_spot"
