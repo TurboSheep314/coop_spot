@@ -21,13 +21,13 @@ For example, if we had a box of cereal, a bowl, milk, and a spoon on a table, we
 
 ## How-to
 Open the command prompt
-Change directory to ~/ros2_dev
+Change directory to `~/ros2_dev`
 Type `source ~/ros2_dev/install/setup.bash`
 
 To launch the program type `ros2 launch coop_spot coop_spot.launch.py`
 
 If you make edits to the program, type `colcon build --packages-select coop_spot` to update it for launch
 
-We use github for version control, if you want to make a commit, change the directory to ~/ros2_dev/src/coop_spot, type "git commit", type your commit message, then type :wq to save and quit.
+We use github for version control, if you want to make a commit, change the directory to `~/ros2_dev/src/coop_spot`, type `git commit`, type your commit message, then type `:wq` to save and quit.
 
-To push the commits, type "git push coop_spot"
+To push the commits, type `git push coop_spot`
