@@ -5,22 +5,20 @@ from launch_ros.actions import Node
 from ament_index_python import get_package_share_directory
 import os
 
+
 def generate_launch_description():
-    return LaunchDescription([
-        Node(
-            package="coop_spot",
-            executable="camera_controller"
-        ),
-        Node(
-            package="coop_spot",
-            executable="robot_controller"
-        ),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(get_package_share_directory("zed_wrapper"), "launch/zed_camera.launch.py")
+    return LaunchDescription(
+        [
+            Node(package="coop_spot", executable="camera_controller"),
+            Node(package="coop_spot", executable="robot_controller"),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(
+                        get_package_share_directory("zed_wrapper"),
+                        "launch/zed_camera.launch.py",
+                    )
+                ),
+                launch_arguments={"camera_model": "zed2"}.items(),
             ),
-            launch_arguments={
-                'camera_model': 'zed2'
-            }.items()
-        )
-    ])
+        ]
+    )

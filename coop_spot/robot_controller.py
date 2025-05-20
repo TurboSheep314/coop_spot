@@ -1,46 +1,26 @@
 # System
 import time
 import sys
-import os
-import glob
-from datetime import datetime
 from threading import Thread
-import shutil
-import json
 import math
 
 # ROS
 import rclpy
 from rclpy.node import Node
-from rclpy.action import ActionClient
-from geometry_msgs.msg import TransformStamped, Transform, Vector3, Quaternion, PoseStamped, Pose, Point, PoseArray
-from std_msgs.msg import Header, Bool, String, Int32
-from sensor_msgs.msg import Image, CompressedImage, JointState, Joy
-from builtin_interfaces.msg import Time
-from tf2_msgs.msg import TFMessage
-from tf2_ros.buffer import Buffer
-from tf2_ros.transform_listener import TransformListener
+from std_msgs.msg import Bool
+from sensor_msgs.msg import Image
 from rclpy.executors import MultiThreadedExecutor
-from transforms3d.euler import quat2euler
-from transforms3d.quaternions import mat2quat
-from nav_msgs.msg import Path
-from transforms3d.euler import quat2euler, euler2quat
-from custom_actions.action import Gripper, GraspObject, ArmTagPose, SendPose, SendJointPose, SendBool
 
 # rosbags
-from rosbags.rosbag2 import Writer, Reader
-from rosbags.serde import serialize_cdr, deserialize_cdr
-from rosbags.typesys.types import geometry_msgs__msg__TransformStamped as rbTransformStamped
-from rosbags.typesys.types import geometry_msgs__msg__Transform as rbTransform
-from rosbags.typesys.types import geometry_msgs__msg__Vector3 as rbVector3
-from rosbags.typesys.types import geometry_msgs__msg__Quaternion as rbQuaternion
-from rosbags.typesys.types import std_msgs__msg__Header as rbHeader
-from rosbags.typesys.types import builtin_interfaces__msg__Time as rbTime
 
 # Boston Dynamics
 from bosdyn import geometry
-from bosdyn.api import geometry_pb2, image_pb2, trajectory_pb2, world_object_pb2, arm_command_pb2, robot_command_pb2, synchronized_command_pb2, gripper_command_pb2, arm_surface_contact_pb2, arm_surface_contact_service_pb2
-from bosdyn.api.geometry_pb2 import SE2Velocity, SE2VelocityLimit, Vec2
+from bosdyn.api import (
+    geometry_pb2,
+    image_pb2,
+    trajectory_pb2,
+    world_object_pb2,
+)
 from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
 from bosdyn.client import create_standard_sdk
 from bosdyn.client.lease import LeaseClient, LeaseKeepAlive
@@ -48,46 +28,42 @@ from bosdyn.client.robot_id import RobotIdClient
 from bosdyn.client.power import PowerClient
 from bosdyn.client.image import ImageClient, build_image_request
 from bosdyn.client.robot_state import RobotStateClient
-from bosdyn.client.robot_command import RobotCommandClient, RobotCommandBuilder, blocking_stand, blocking_sit, block_until_arm_arrives, CommandFailedError
+from bosdyn.client.robot_command import (
+    RobotCommandClient,
+    RobotCommandBuilder,
+    blocking_stand,
+)
 from bosdyn.client.world_object import WorldObjectClient
-from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b, get_vision_tform_body, get_odom_tform_body, GRAV_ALIGNED_BODY_FRAME_NAME, ODOM_FRAME_NAME, HAND_FRAME_NAME, add_edge_to_tree
-from bosdyn.client.math_helpers import SE3Pose, Quat, quat_to_eulerZYX, SE2Pose
+from bosdyn.client.frame_helpers import (
+    BODY_FRAME_NAME,
+    VISION_FRAME_NAME,
+    get_a_tform_b,
+    get_vision_tform_body,
+)
+from bosdyn.client.math_helpers import Quat
 import bosdyn.client.util
-from bosdyn.util import seconds_to_duration
-from bosdyn.client.docking import DockingClient, blocking_dock_robot, blocking_undock, get_dock_id
+from bosdyn.client.docking import (
+    DockingClient,
+    blocking_undock,
+    get_dock_id,
+)
 from bosdyn.client.arm_surface_contact import ArmSurfaceContactClient
 
 # Spot Driver
-from spot_msgs.msg import BatteryStateArray
 
 # PyQt5
-import PyQt5
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5 import QtWidgets
-from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget, QFileDialog, QGridLayout,QTabWidget,QFileDialog
-from PyQt5.QtGui import QPixmap
-from PyQt5 import QtGui, QtCore
-from PyQt5.QtGui import QCursor,QImage, QPalette, QBrush
-from PyQt5.QtCore import QSize
+from PyQt5.QtWidgets import (
+    QApplication,
+)
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
-from PyQt5.QtWidgets import QTableWidgetItem
 
 
 # Cartesian DMP
-import pytransform3d.visualizer as pv
-import pytransform3d.rotations as pr
-import pytransform3d.transformations as pt
-import pytransform3d.trajectories as ptr
-from movement_primitives.dmp import CartesianDMP
-from movement_primitives.dmp._dmp import dmp_imitate, dmp_open_loop
-from movement_primitives.promp import ProMP
 
 # OpenCV
 import cv2
-from cv_bridge import CvBridge
-import mediapipe as mp
 
 # Misc
 import numpy as np
@@ -96,22 +72,23 @@ from PIL import Image
 
 
 # Data Collection
-import csv 
+
 
 class RobotController(Node):
     """
-    This node is for anything ran off of Spot. 
+    This node is for anything ran off of Spot.
 
     Currently only used for Apriltag detection, but the goal is to have
     Spot detect april tags and pick up objects based on the human's intention.
     If we have two objects, A and B, and the human starts reaching for object A,
     spot will read that intention, and using Object B's april tag, pick it up.
     """
+
     def __init__(self):
         super().__init__("robot_controller")
 
         # Stop robot command
-        self.create_subscription(Bool, '/stop_robot_flag', self.stop_robot_callback, 1)
+        self.create_subscription(Bool, "/stop_robot_flag", self.stop_robot_callback, 1)
 
         self.setup_robot()
 
@@ -120,11 +97,15 @@ class RobotController(Node):
 
         # List of all possible camera sources.
         self._source_names = [
-            src.name for src in self._image_client.list_image_sources() if
-            (src.image_type == image_pb2.ImageSource.IMAGE_TYPE_VISUAL and 'depth' not in src.name)
+            src.name
+            for src in self._image_client.list_image_sources()
+            if (
+                src.image_type == image_pb2.ImageSource.IMAGE_TYPE_VISUAL
+                and "depth" not in src.name
+            )
         ]
 
-        self.timer = self.create_timer(.05, self.run)
+        self.timer = self.create_timer(0.05, self.run)
 
     @property
     def robot_state(self):
@@ -143,7 +124,7 @@ class RobotController(Node):
 
     def populate_source_dict(self):
         """Fills dictionary of the most recently computed camera extrinsics with the camera source.
-           The initial boolean indicates if the extrinsics guess should be used."""
+        The initial boolean indicates if the extrinsics guess should be used."""
         camera_to_extrinsics_guess = dict()
         for src in self._source_names:
             # Dictionary values: use_extrinsics_guess bool, (rotation vector, translation vector) tuple.
@@ -161,30 +142,32 @@ class RobotController(Node):
         if bboxes:
             self._previous_source = source_name
             (tvec, _, source_name) = self.pixel_coords_to_camera_coords(
-                bboxes, self._intrinsics, source_name)
+                bboxes, self._intrinsics, source_name
+            )
             vision_tform_fiducial_position = self.compute_fiducial_in_world_frame(tvec)
-            fiducial_rt_world = geometry_pb2.Vec3(x=vision_tform_fiducial_position[0],
-                                                    y=vision_tform_fiducial_position[1],
-                                                    z=vision_tform_fiducial_position[2])
+            fiducial_rt_world = geometry_pb2.Vec3(
+                x=vision_tform_fiducial_position[0],
+                y=vision_tform_fiducial_position[1],
+                z=vision_tform_fiducial_position[2],
+            )
             detected_fiducial = True
         if detected_fiducial:
             # Go to the tag and stop within a certain distance
-            #self.go_to_tag(fiducial_rt_world)
+            # self.go_to_tag(fiducial_rt_world)
             self.get_logger().info("Fiducial found!", throttle_duration_sec=3)
         else:
-            self.get_logger().info('No fiducials found', throttle_duration_sec=3)
+            self.get_logger().info("No fiducials found", throttle_duration_sec=3)
 
         # Power off at the conclusion of the example.
         if self._powered_on:
             self.power_off()
 
-    def stop_robot_callback(self, msg : Bool):
+    def stop_robot_callback(self, msg: Bool):
         """Activated when the /stop_robot_flag is called"""
         self.get_logger().warn("SETTING ROBOT FLAG")
         self.stop_robot_flag = msg.data
 
         if self.stop_robot_flag:
-
             if self.stop_on:
                 self.get_logger().warn("ALREADY STOPPED")
             else:
@@ -194,7 +177,6 @@ class RobotController(Node):
 
                 stop_time = time.time()
                 self.save_state_data(stop_time)
-                
 
                 self.get_logger().info("DONE STOPPING MOVEMENT")
             self.stop_on = True
@@ -206,7 +188,8 @@ class RobotController(Node):
         # Get all fiducial objects (an object of a specific type).
         request_fiducials = [world_object_pb2.WORLD_OBJECT_APRILTAG]
         fiducial_objects = self._world_object_client.list_world_objects(
-            object_type=request_fiducials).world_objects
+            object_type=request_fiducials
+        ).world_objects
         self.get_logger().info(fiducial_objects)
         if len(fiducial_objects) > 0:
             # Return the first detected fiducial.
@@ -218,17 +201,17 @@ class RobotController(Node):
         """Power on the robot."""
         self._robot.power_on()
         self._powered_on = True
-        print(f'Powered On {self._robot.is_powered_on()}')
+        print(f"Powered On {self._robot.is_powered_on()}")
 
     def power_off(self):
         """Power off the robot."""
         self._robot.power_off()
-        print(f'Powered Off {not self._robot.is_powered_on()}')
+        print(f"Powered Off {not self._robot.is_powered_on()}")
 
     def image_to_bounding_box(self):
         """Determine which camera source has a fiducial.
-           Return the bounding box of the first detected fiducial."""
-        #Iterate through all five camera sources to check for a fiducial
+        Return the bounding box of the first detected fiducial."""
+        # Iterate through all five camera sources to check for a fiducial
         for i in range(len(self._source_names) + 1):
             # Get the image from the source camera.
             if i == 0:
@@ -242,14 +225,22 @@ class RobotController(Node):
             else:
                 source_name = self._source_names[i - 1]
 
-            img_req = build_image_request(source_name, quality_percent=100,
-                                          image_format=image_pb2.Image.FORMAT_RAW)
+            img_req = build_image_request(
+                source_name,
+                quality_percent=100,
+                image_format=image_pb2.Image.FORMAT_RAW,
+            )
             image_response = self._image_client.get_image([img_req])
-            self._camera_tform_body = get_a_tform_b(image_response[0].shot.transforms_snapshot,
-                                                    image_response[0].shot.frame_name_image_sensor,
-                                                    BODY_FRAME_NAME)
-            self._body_tform_world = get_a_tform_b(image_response[0].shot.transforms_snapshot,
-                                                   BODY_FRAME_NAME, VISION_FRAME_NAME)
+            self._camera_tform_body = get_a_tform_b(
+                image_response[0].shot.transforms_snapshot,
+                image_response[0].shot.frame_name_image_sensor,
+                BODY_FRAME_NAME,
+            )
+            self._body_tform_world = get_a_tform_b(
+                image_response[0].shot.transforms_snapshot,
+                BODY_FRAME_NAME,
+                VISION_FRAME_NAME,
+            )
 
             # Camera intrinsics for the given source camera.
             self._intrinsics = image_response[0].source.pinhole.intrinsics
@@ -257,32 +248,36 @@ class RobotController(Node):
             height = image_response[0].shot.image.rows
 
             # detect given fiducial in image and return the bounding box of it
-            bboxes = self.detect_fiducial_in_image(image_response[0].shot.image, (width, height),
-                                                   source_name)
+            bboxes = self.detect_fiducial_in_image(
+                image_response[0].shot.image, (width, height), source_name
+            )
             if bboxes:
-                print(f'Found bounding box for {source_name}')
+                print(f"Found bounding box for {source_name}")
                 return bboxes, source_name
             else:
                 self._tag_not_located = True
-                print(f'Failed to find bounding box for {source_name}')
+                print(f"Failed to find bounding box for {source_name}")
         return [], None
 
     def detect_fiducial_in_image(self, image, dim, source_name):
         """Detect the fiducial within a single image and return its bounding box."""
         image_grey = np.array(
-            Image.frombytes('P', (int(dim[0]), int(dim[1])), data=image.data, decoder_name='raw'))
+            Image.frombytes(
+                "P", (int(dim[0]), int(dim[1])), data=image.data, decoder_name="raw"
+            )
+        )
 
-        #Rotate each image such that it is upright
+        # Rotate each image such that it is upright
         image_grey = self.rotate_image(image_grey, source_name)
 
-        #Make the image greyscale to use bounding box detections
-        detector = apriltag(family='tag36h11')
+        # Make the image greyscale to use bounding box detections
+        detector = apriltag(family="tag36h11")
         detections = detector.detect(image_grey)
 
         bboxes = []
         for i in range(len(detections)):
             # Draw the bounding box detection in the image.
-            bbox = detections[i]['lb-rb-rt-lt']
+            bbox = detections[i]["lb-rb-rt-lt"]
             cv2.polylines(image_grey, [np.int32(bbox)], True, (0, 0, 0), 2)
             bboxes.append(bbox)
 
@@ -291,18 +286,31 @@ class RobotController(Node):
 
     def bbox_to_image_object_pts(self, bbox):
         """Determine the object points and image points for the bounding box.
-           The origin in object coordinates = top left corner of the fiducial.
-           Order both points sets following: (TL,TR, BL, BR)"""
-        fiducial_height_and_width = 146  #mm
-        obj_pts = np.array([[0, 0], [fiducial_height_and_width, 0], [0, fiducial_height_and_width],
-                            [fiducial_height_and_width, fiducial_height_and_width]],
-                           dtype=np.float32)
-        #insert a 0 as the third coordinate (xyz)
+        The origin in object coordinates = top left corner of the fiducial.
+        Order both points sets following: (TL,TR, BL, BR)"""
+        fiducial_height_and_width = 146  # mm
+        obj_pts = np.array(
+            [
+                [0, 0],
+                [fiducial_height_and_width, 0],
+                [0, fiducial_height_and_width],
+                [fiducial_height_and_width, fiducial_height_and_width],
+            ],
+            dtype=np.float32,
+        )
+        # insert a 0 as the third coordinate (xyz)
         obj_points = np.insert(obj_pts, 2, 0, axis=1)
 
-        #['lb-rb-rt-lt']
-        img_pts = np.array([[bbox[3][0], bbox[3][1]], [bbox[2][0], bbox[2][1]],
-                            [bbox[0][0], bbox[0][1]], [bbox[1][0], bbox[1][1]]], dtype=np.float32)
+        # ['lb-rb-rt-lt']
+        img_pts = np.array(
+            [
+                [bbox[3][0], bbox[3][1]],
+                [bbox[2][0], bbox[2][1]],
+                [bbox[0][0], bbox[0][1]],
+                [bbox[1][0], bbox[1][1]],
+            ],
+            dtype=np.float32,
+        )
         return obj_points, img_pts
 
     def pixel_coords_to_camera_coords(self, bbox, intrinsics, source_name):
@@ -311,25 +319,41 @@ class RobotController(Node):
         # Track a triplet of (translation vector, rotation vector, camera source name)
         best_bbox = (None, None, source_name)
         # The best bounding box is considered the closest to the robot body.
-        closest_dist = float('inf')
+        closest_dist = float("inf")
         for i in range(len(bbox)):
             obj_points, img_points = self.bbox_to_image_object_pts(bbox[i])
             if self._camera_to_extrinsics_guess[source_name][0]:
                 # initialize the position estimate with the previous extrinsics solution
                 # then iteratively solve for new position
                 old_rvec, old_tvec = self._camera_to_extrinsics_guess[source_name][1]
-                _, rvec, tvec = cv2.solvePnP(obj_points, img_points, camera, np.zeros((5, 1)),
-                                             old_rvec, old_tvec, True, cv2.SOLVEPNP_ITERATIVE)
+                _, rvec, tvec = cv2.solvePnP(
+                    obj_points,
+                    img_points,
+                    camera,
+                    np.zeros((5, 1)),
+                    old_rvec,
+                    old_tvec,
+                    True,
+                    cv2.SOLVEPNP_ITERATIVE,
+                )
             else:
                 # Determine current extrinsic solution for the tag.
-                _, rvec, tvec = cv2.solvePnP(obj_points, img_points, camera, np.zeros((5, 1)))
+                _, rvec, tvec = cv2.solvePnP(
+                    obj_points, img_points, camera, np.zeros((5, 1))
+                )
 
             # Save extrinsics results to help speed up next attempts to locate bounding box in
             # the same camera source.
             self._camera_to_extrinsics_guess[source_name] = (True, (rvec, tvec))
 
-            dist = math.sqrt(float(tvec[0][0])**2 + float(tvec[1][0])**2 +
-                             float(tvec[2][0])**2) / 1000.0
+            dist = (
+                math.sqrt(
+                    float(tvec[0][0]) ** 2
+                    + float(tvec[1][0]) ** 2
+                    + float(tvec[2][0]) ** 2
+                )
+                / 1000.0
+            )
             if dist < closest_dist:
                 closest_dist = dist
                 best_bbox = (tvec, rvec, source_name)
@@ -341,13 +365,20 @@ class RobotController(Node):
     def compute_fiducial_in_world_frame(self, tvec):
         """Transform the tag position from camera coordinates to world coordinates."""
         fiducial_rt_camera_frame = np.array(
-            [float(tvec[0][0]) / 1000.0,
-             float(tvec[1][0]) / 1000.0,
-             float(tvec[2][0]) / 1000.0])
+            [
+                float(tvec[0][0]) / 1000.0,
+                float(tvec[1][0]) / 1000.0,
+                float(tvec[2][0]) / 1000.0,
+            ]
+        )
         body_tform_fiducial = (self._camera_tform_body.inverse()).transform_point(
-            fiducial_rt_camera_frame[0], fiducial_rt_camera_frame[1], fiducial_rt_camera_frame[2])
+            fiducial_rt_camera_frame[0],
+            fiducial_rt_camera_frame[1],
+            fiducial_rt_camera_frame[2],
+        )
         fiducial_rt_world = self._body_tform_world.inverse().transform_point(
-            body_tform_fiducial[0], body_tform_fiducial[1], body_tform_fiducial[2])
+            body_tform_fiducial[0], body_tform_fiducial[1], body_tform_fiducial[2]
+        )
         return fiducial_rt_world
 
     def go_to_tag(self, fiducial_rt_world):
@@ -355,35 +386,47 @@ class RobotController(Node):
         # Compute the go-to point (offset by .5m from the fiducial position) and the heading at
         # this point.
         self._current_tag_world_pose, self._angle_desired = self.offset_tag_pose(
-            fiducial_rt_world, 0.0)
+            fiducial_rt_world, 0.0
+        )
 
-        #Command the robot to go to the tag in kinematic odometry frame
+        # Command the robot to go to the tag in kinematic odometry frame
         tag_cmd = RobotCommandBuilder.synchro_se2_trajectory_point_command(
-            goal_x=self._current_tag_world_pose[0], goal_y=self._current_tag_world_pose[1],
-            goal_heading=self._angle_desired, frame_name=VISION_FRAME_NAME,
-            body_height=0.0, locomotion_hint=spot_command_pb2.HINT_AUTO)
+            goal_x=self._current_tag_world_pose[0],
+            goal_y=self._current_tag_world_pose[1],
+            goal_heading=self._angle_desired,
+            frame_name=VISION_FRAME_NAME,
+            body_height=0.0,
+            locomotion_hint=spot_command_pb2.HINT_AUTO,
+        )
         end_time = 5.0
         if self._powered_on:
-            #Issue the command to the robot
-            self._robot_command_client.robot_command(lease=None, command=tag_cmd,
-                                                     end_time_secs=time.time() + end_time)
+            # Issue the command to the robot
+            self._robot_command_client.robot_command(
+                lease=None, command=tag_cmd, end_time_secs=time.time() + end_time
+            )
             # #Feedback to check and wait until the robot is in the desired position or timeout
             start_time = time.time()
             current_time = time.time()
-            while (not self.final_state() and current_time - start_time < end_time):
-                time.sleep(.25)
+            while not self.final_state() and current_time - start_time < end_time:
+                time.sleep(0.25)
                 current_time = time.time()
         return
 
     def final_state(self):
         """Check if the current robot state is within range of the fiducial position."""
-        robot_state = get_vision_tform_body(self.robot_state.kinematic_state.transforms_snapshot)
+        robot_state = get_vision_tform_body(
+            self.robot_state.kinematic_state.transforms_snapshot
+        )
         robot_angle = robot_state.rot.to_yaw()
         if self._current_tag_world_pose.size != 0:
             x_dist = abs(self._current_tag_world_pose[0] - robot_state.x)
             y_dist = abs(self._current_tag_world_pose[1] - robot_state.y)
             angle = abs(self._angle_desired - robot_angle)
-            if ((x_dist < self._x_eps) and (y_dist < self._y_eps) and (angle < self._angle_eps)):
+            if (
+                (x_dist < self._x_eps)
+                and (y_dist < self._y_eps)
+                and (angle < self._angle_eps)
+            ):
                 return True
         return False
 
@@ -396,16 +439,26 @@ class RobotController(Node):
 
     def offset_tag_pose(self, object_rt_world, dist_margin=1.0):
         """Offset the go-to location of the fiducial and compute the desired heading."""
-        robot_rt_world = get_vision_tform_body(self.robot_state.kinematic_state.transforms_snapshot)
+        robot_rt_world = get_vision_tform_body(
+            self.robot_state.kinematic_state.transforms_snapshot
+        )
         robot_to_object_ewrt_world = np.array(
-            [object_rt_world.x - robot_rt_world.x, object_rt_world.y - robot_rt_world.y, 0])
+            [
+                object_rt_world.x - robot_rt_world.x,
+                object_rt_world.y - robot_rt_world.y,
+                0,
+            ]
+        )
         robot_to_object_ewrt_world_norm = robot_to_object_ewrt_world / np.linalg.norm(
-            robot_to_object_ewrt_world)
+            robot_to_object_ewrt_world
+        )
         heading = self.get_desired_angle(robot_to_object_ewrt_world_norm)
-        goto_rt_world = np.array([
-            object_rt_world.x - robot_to_object_ewrt_world_norm[0] * dist_margin,
-            object_rt_world.y - robot_to_object_ewrt_world_norm[1] * dist_margin
-        ])
+        goto_rt_world = np.array(
+            [
+                object_rt_world.x - robot_to_object_ewrt_world_norm[0] * dist_margin,
+                object_rt_world.y - robot_to_object_ewrt_world_norm[1] * dist_margin,
+            ]
+        )
         return goto_rt_world, heading
 
     @staticmethod
@@ -422,25 +475,31 @@ class RobotController(Node):
     @staticmethod
     def rotate_image(image, source_name):
         """Rotate the image so that it is always displayed upright."""
-        if source_name == 'frontleft_fisheye_image':
+        if source_name == "frontleft_fisheye_image":
             image = cv2.rotate(image, rotateCode=0)
-        elif source_name == 'right_fisheye_image':
+        elif source_name == "right_fisheye_image":
             image = cv2.rotate(image, rotateCode=1)
-        elif source_name == 'frontright_fisheye_image':
+        elif source_name == "frontright_fisheye_image":
             image = cv2.rotate(image, rotateCode=0)
         return image
 
     @staticmethod
     def make_camera_matrix(ints):
         """Transform the ImageResponse proto intrinsics into a camera matrix."""
-        camera_matrix = np.array([[ints.focal_length.x, ints.skew.x, ints.principal_point.x],
-                                  [ints.skew.y, ints.focal_length.y, ints.principal_point.y],
-                                  [0, 0, 1]])
+        camera_matrix = np.array(
+            [
+                [ints.focal_length.x, ints.skew.x, ints.principal_point.x],
+                [ints.skew.y, ints.focal_length.y, ints.principal_point.y],
+                [0, 0, 1],
+            ]
+        )
         return camera_matrix
 
-    def setup_robot(self): # Taken from user_study
+    def setup_robot(self):  # Taken from user_study
         # Create robot object
-        self._robot = create_standard_sdk("robot_controller").create_robot("192.168.80.3")
+        self._robot = create_standard_sdk("robot_controller").create_robot(
+            "192.168.80.3"
+        )
 
         # Authenticate robot
         bosdyn.client.util.authenticate(self._robot)
@@ -450,32 +509,46 @@ class RobotController(Node):
 
         # Ensure robot not estopped
         while self._robot.is_estopped():
-            self.get_logger().warning("Waiting for robot estop...", throttle_duration_sec=1)
+            self.get_logger().warning(
+                "Waiting for robot estop...", throttle_duration_sec=1
+            )
 
         # Store robot id
-        self._robot_id = self._robot.ensure_client(RobotIdClient.default_service_name).get_id(timeout=10)
+        self._robot_id = self._robot.ensure_client(
+            RobotIdClient.default_service_name
+        ).get_id(timeout=10)
 
         # Setup clients
         self._lease_client = self._robot.ensure_client(LeaseClient.default_service_name)
         self._power_client = self._robot.ensure_client(PowerClient.default_service_name)
         self._image_client = self._robot.ensure_client(ImageClient.default_service_name)
-        self._robot_state_client = self._robot.ensure_client(RobotStateClient.default_service_name)
-        self._robot_command_client = self._robot.ensure_client(RobotCommandClient.default_service_name)
-        self._world_object_client = self._robot.ensure_client(WorldObjectClient.default_service_name)
-        self._docking_client = self._robot.ensure_channel(DockingClient.default_service_name)
-        self._arm_surface_contact_client = self._robot.ensure_client(ArmSurfaceContactClient.default_service_name)
+        self._robot_state_client = self._robot.ensure_client(
+            RobotStateClient.default_service_name
+        )
+        self._robot_command_client = self._robot.ensure_client(
+            RobotCommandClient.default_service_name
+        )
+        self._world_object_client = self._robot.ensure_client(
+            WorldObjectClient.default_service_name
+        )
+        self._docking_client = self._robot.ensure_channel(
+            DockingClient.default_service_name
+        )
+        self._arm_surface_contact_client = self._robot.ensure_client(
+            ArmSurfaceContactClient.default_service_name
+        )
 
         # Setup variables
-        self._max_x_vel = 0.4 #m/s
-        self._max_y_vel = 0.4 #m/s
-        self._max_ang_vel = 0.3 #rad/s
-        self._max_arm_lin_vel = 0.4 #m/s
-        self._max_arm_ang_vel = 0.3 #rad/s
-        self._max_arm_accel = 0.3 # valid range (0,20]
-        self._max_arm_joint_vel = 1 #rad/s
-        self._max_gripper_vel = 1 #rad/s
-        self._max_grasp_accel = 0.3 #rad/s
-        self._max_grasp_ang_vel = 0.3 #rad/s
+        self._max_x_vel = 0.4  # m/s
+        self._max_y_vel = 0.4  # m/s
+        self._max_ang_vel = 0.3  # rad/s
+        self._max_arm_lin_vel = 0.4  # m/s
+        self._max_arm_ang_vel = 0.3  # rad/s
+        self._max_arm_accel = 0.3  # valid range (0,20]
+        self._max_arm_joint_vel = 1  # rad/s
+        self._max_gripper_vel = 1  # rad/s
+        self._max_grasp_accel = 0.3  # rad/s
+        self._max_grasp_ang_vel = 0.3  # rad/s
 
         # Epsilon distance between robot and desired go-to point
         self._x_eps = 0.05
@@ -520,8 +593,12 @@ class RobotController(Node):
 
         # List of all possible camera sources.
         self._source_names = [
-            src.name for src in self._image_client.list_image_sources() if
-            (src.image_type == image_pb2.ImageSource.IMAGE_TYPE_VISUAL and 'depth' not in src.name)
+            src.name
+            for src in self._image_client.list_image_sources()
+            if (
+                src.image_type == image_pb2.ImageSource.IMAGE_TYPE_VISUAL
+                and "depth" not in src.name
+            )
         ]
         print(self._source_names)
 
@@ -531,10 +608,8 @@ class RobotController(Node):
         # Camera source which a bounding box was last detected in.
         self._previous_source = None
 
-
-
         self.get_logger().info("LEASES: " + str(self._lease_client.list_leases()))
-        
+
         # Try to take lease
         try:
             self._lease_client.take()
@@ -543,22 +618,21 @@ class RobotController(Node):
             self.get_logger().warn("LEASE COULD NOT BE TAKEN")
 
         # Create lease
-        self._lease_keep_alive = LeaseKeepAlive(lease_client=self._lease_client,
-                    must_acquire=True,
-                    return_at_exit=True).__enter__()
+        self._lease_keep_alive = LeaseKeepAlive(
+            lease_client=self._lease_client, must_acquire=True, return_at_exit=True
+        ).__enter__()
 
         # Wait for time sync
         self._robot.time_sync.wait_for_sync()
 
         # Wait for motors to power on
-        self._robot.power_on()   
+        self._robot.power_on()
 
         dock_id = get_dock_id(self._robot)
         if dock_id is None:
-            self.get_logger().info('Robot is not docked; standing')
+            self.get_logger().info("Robot is not docked; standing")
         else:
-
-            self.get_logger().info(f'Docked at {dock_id}')
+            self.get_logger().info(f"Docked at {dock_id}")
             blocking_undock(self._robot)
 
         # Stand robot
@@ -566,9 +640,10 @@ class RobotController(Node):
 
         self.get_logger().info("Done with robot setup.")
 
+
 # Main Function
 def main():
-        # Initalize ROS
+    # Initalize ROS
     rclpy.init()
 
     app = QApplication(sys.argv)
@@ -587,6 +662,7 @@ def main():
         print("Keyboard Interrupt called!")
     finally:
         executor.shutdown()
+
 
 if __name__ == "__main__":
     main()
