@@ -21,10 +21,10 @@ from PyQt5.QtWidgets import (
     QApplication,
 )
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import *
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
 
+# from PyQt5.QtGui import *
+from PyQt5.QtWidgets import QMainWindow
+from PyQt5.QtCore import Qt
 
 # Cartesian DMP
 
@@ -42,9 +42,7 @@ from apriltag import apriltag
 import csv
 
 
-class CameraNode(
-    Node
-):  # Could use a rename, but not sure to what. It doesn't control the camera, but it does a lot of different stuff with it. Not important to rename, just a thought.
+class CameraProcessNode(Node):
     """
     This node is for anything to do from the ZED Camera.
 
@@ -90,6 +88,13 @@ class CameraNode(
             + ["Closest Apriltag ID"]
             + ["Distance between Hand and Apriltag"]
         )
+        self.world_state = {
+            4: {"name": "bowl", "present": False},
+            2: {"name": "bleach", "present": False},
+            43: {"name": "sponge", "present": False},
+            0: {"name": "table", "present": False},
+            12: {"name": "powder", "present": False},
+        }
 
         # GUI Intialization
         self.gui = QMainWindow()
@@ -124,14 +129,34 @@ class CameraNode(
 
         # Get detections on greyscale image
         detections = detector.detect(img)
-
+        apriltag_IDs = []
         for i in range(len(detections)):
             # Get bounding box for current detection
             bbox = detections[i]["lb-rb-rt-lt"]
             bbox_id = detections[i]["id"]
+            apriltag_IDs.append(bbox_id)
 
             # Add current detection to dictionary of april tag bounding boxes
             self.bboxes[bbox_id] = bbox
+        self.get_logger().info(
+            f"April tag IDs detected: {apriltag_IDs}", throttle_duration_sec=3
+        )
+
+        # Update the world state
+        for state in self.world_state:
+            # Reset the world state
+            self.world_state[state]["present"] = False
+        for id in apriltag_IDs:
+            if id in self.world_state.keys():
+                self.world_state[id]["present"] = True
+        current_world_state = []
+        for state in self.world_state:
+            if self.world_state[state]["present"]:
+                current_world_state.append(self.world_state[state]["name"])
+        self.get_logger().info(
+            f"World state: {current_world_state}",
+            throttle_duration_sec=3,
+        )
 
     def hypotenuse(self, p1, p2):
         """Calculates the hypotenuse between two points in 2d space."""
@@ -291,7 +316,7 @@ def main():
 
     app = QApplication(sys.argv)
 
-    camera_node = CameraNode()
+    camera_node = CameraProcessNode()
 
     executor = MultiThreadedExecutor()
     executor.add_node(camera_node)
