@@ -104,13 +104,13 @@ class CameraProcessNode(Node):
     def initGUI(self):
         """Initializes basic GUI elements"""
         self.gui.setWindowTitle("Main Window")
-        self.window_height = 800
-        self.window_width = 800
+        self.window_height = 1200
+        self.window_width = 1400
         self.gui.resize(self.window_width, self.window_height)
         self.veltext = QtWidgets.QLabel(self.gui)
-        self.veltext.setGeometry(QtCore.QRect(0, 0, 400, 200))
+        self.veltext.setGeometry(QtCore.QRect(100, 0, 800, 200))
         self.proxtext = QtWidgets.QLabel(self.gui)
-        self.proxtext.setGeometry(QtCore.QRect(400, 0, 800, 200))
+        self.proxtext.setGeometry(QtCore.QRect(100, 100, 800, 200))
 
     def set_image_callback(self, msg):
         """Callback for each new image captured by ZED Camera"""
@@ -285,7 +285,7 @@ class CameraProcessNode(Node):
                 self.window_height, self.window_width, Qt.KeepAspectRatio
             )
             label = QtWidgets.QLabel(self.gui)
-            label.setGeometry(QtCore.QRect(0, 0, 800, 800))
+            label.setGeometry(QtCore.QRect(100, 100, 1200, 1200))
             label.setPixmap(pixmap)
             label.show()
 
