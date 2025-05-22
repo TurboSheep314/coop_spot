@@ -103,7 +103,7 @@ class CameraProcessNode(Node):
 
     def initGUI(self):
         """Initializes basic GUI elements"""
-        self.gui.setWindowTitle("Main Window")
+        self.gui.setWindowTitle("ZED camera")
         self.window_height = 1200
         self.window_width = 1400
         self.gui.resize(self.window_width, self.window_height)
@@ -215,9 +215,9 @@ class CameraProcessNode(Node):
                         # Velocity of Wrist
                         if id == 0:
                             wristlm = lm
-                            if (
-                                self.prev_wrist is not None
-                            ):  # Number of images per second is 15, will make it more accurate in the future, but this is consistent for the first couple minutes of the cameras
+                            if self.prev_wrist is not None:
+                                # Number of images per second is 15, will make it more accurate in the future,
+                                # but this is consistent for the first couple minutes of the cameras
                                 self.velocity = (
                                     (cx - self.prev_wrist[0]) / 15,
                                     (cy - self.prev_wrist[1]) / 15,
@@ -271,6 +271,37 @@ class CameraProcessNode(Node):
                     list(map(str, self.velocity))
                     + list(map(str, self.closest_apriltag))
                 )
+
+            if self.bboxes:
+                # Draw the names of the objects (i.e. world state)
+                for id, coords in self.bboxes.items():  # For each april tag
+                    self.get_logger().info(
+                        f"\nBounding boxes coordinates:\n{coords}",
+                        throttle_duration_sec=3,
+                    )
+                    height, width, _ = img.shape
+                    cx, cy = int(width - coords[0][0] - 1), int(coords[0][1])
+                    # rect_width = int(len(self.world_state[id]["name"]) * 1.5)
+                    # rect_x, rect_y, rect_w, rect_h = cx, cy, rect_width, 50
+                    rect_w = 100
+                    rect_h = 50
+                    # cv2.rectangle(
+                    #     img=img,
+                    #     pt1=(rect_x, rect_y),
+                    #     pt2=(rect_x + rect_w, rect_y + rect_h),
+                    #     color=(0, 0, 0),
+                    #     thickness=-1,
+                    # )
+                    cv2.putText(
+                        img=img,
+                        text=self.world_state[id]["name"],
+                        org=(cx + int(rect_w / 10), cy + int(rect_h / 1.5)),
+                        fontFace=cv2.FONT_HERSHEY_DUPLEX,
+                        fontScale=1.0,
+                        color=(171, 39, 79),
+                        thickness=2,
+                        lineType=cv2.FILLED,
+                    )
 
             converted_image = np.asarray(img)
 
