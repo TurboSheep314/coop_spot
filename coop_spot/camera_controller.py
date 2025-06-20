@@ -275,10 +275,10 @@ class CameraProcessNode(Node):
             if self.bboxes:
                 # Draw the names of the objects (i.e. world state)
                 for id, coords in self.bboxes.items():  # For each april tag
-                    self.get_logger().info(
-                        f"\nBounding boxes coordinates:\n{coords}",
-                        throttle_duration_sec=3,
-                    )
+                    # self.get_logger().info(
+                    #     f"\nBounding boxes coordinates:\n{coords}",
+                    #     throttle_duration_sec=3,
+                    # )
                     height, width, _ = img.shape
                     cx, cy = int(width - coords[0][0] - 1), int(coords[0][1])
                     # rect_width = int(len(self.world_state[id]["name"]) * 1.5)
@@ -292,16 +292,21 @@ class CameraProcessNode(Node):
                     #     color=(0, 0, 0),
                     #     thickness=-1,
                     # )
-                    cv2.putText(
-                        img=img,
-                        text=self.world_state[id]["name"],
-                        org=(cx + int(rect_w / 10), cy + int(rect_h / 1.5)),
-                        fontFace=cv2.FONT_HERSHEY_DUPLEX,
-                        fontScale=1.0,
-                        color=(171, 39, 79),
-                        thickness=2,
-                        lineType=cv2.FILLED,
-                    )
+                    if id in self.world_state:
+                        cv2.putText(
+                            img=img,
+                            text=self.world_state[id]["name"],
+                            org=(cx + int(rect_w / 10), cy + int(rect_h / 1.5)),
+                            fontFace=cv2.FONT_HERSHEY_DUPLEX,
+                            fontScale=1.0,
+                            color=(171, 39, 79),
+                            thickness=2,
+                            lineType=cv2.FILLED,
+                        )
+                    else:
+                        self.get_logger().error(
+                            f"ID #{id} not in world_state", throttle_duration_sec=3
+                        )
 
             converted_image = np.asarray(img)
 

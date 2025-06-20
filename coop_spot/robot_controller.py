@@ -1,6 +1,5 @@
 # System
 import time
-import sys
 from threading import Thread
 import math
 
@@ -8,7 +7,8 @@ import math
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool
-from sensor_msgs.msg import Image
+
+# from sensor_msgs.msg import Image
 from rclpy.executors import MultiThreadedExecutor
 
 # rosbags
@@ -51,14 +51,12 @@ from bosdyn.client.arm_surface_contact import ArmSurfaceContactClient
 
 # Spot Driver
 
-# PyQt5
-from PyQt5.QtWidgets import (
-    QApplication,
-)
-from PyQt5.QtCore import *
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
+# # PyQt5
+# from PyQt5.QtWidgets import (
+#     QApplication,
+# )
 
+# from PyQt5.QtGui import *
 
 # Cartesian DMP
 
@@ -150,11 +148,28 @@ class RobotController(Node):
                 y=vision_tform_fiducial_position[1],
                 z=vision_tform_fiducial_position[2],
             )
-            detected_fiducial = True
+
+            self.get_logger().info(
+                f"Camera of the fiducial: {source_name}", throttle_duration_sec=3
+            )
+            if bboxes:
+                for id in bboxes:
+                    self.get_logger().info(
+                        f"Bounding box ID: {id}", throttle_duration_sec=3
+                    )
+                    if id == 4:
+                        self.get_logger().info(
+                            "Detected table's fiducial!", throttle_duration_sec=3
+                        )
+                        detected_fiducial = True
+                        break
+
         if detected_fiducial:
             # Go to the tag and stop within a certain distance
-            # self.go_to_tag(fiducial_rt_world)
-            self.get_logger().info("Fiducial found!", throttle_duration_sec=3)
+            self.get_logger().info(
+                "Fiducial found, moving towards it...", throttle_duration_sec=3
+            )
+            self.go_to_tag(fiducial_rt_world)
         else:
             self.get_logger().info("No fiducials found", throttle_duration_sec=3)
 
@@ -201,16 +216,17 @@ class RobotController(Node):
         """Power on the robot."""
         self._robot.power_on()
         self._powered_on = True
-        print(f"Powered On {self._robot.is_powered_on()}")
+        self.get_logger().info(f"Powered On {self._robot.is_powered_on()}")
 
     def power_off(self):
         """Power off the robot."""
         self._robot.power_off()
-        print(f"Powered Off {not self._robot.is_powered_on()}")
+        self.get_logger().info(f"Powered Off {not self._robot.is_powered_on()}")
 
     def image_to_bounding_box(self):
         """Determine which camera source has a fiducial.
         Return the bounding box of the first detected fiducial."""
+        bboxes, source_name = [], None
         # Iterate through all five camera sources to check for a fiducial
         for i in range(len(self._source_names) + 1):
             # Get the image from the source camera.
@@ -252,12 +268,13 @@ class RobotController(Node):
                 image_response[0].shot.image, (width, height), source_name
             )
             if bboxes:
-                print(f"Found bounding box for {source_name}")
-                return bboxes, source_name
+                self.get_logger().info(f"Found bounding box for {source_name}")
+                # return bboxes, source_name
             else:
                 self._tag_not_located = True
-                print(f"Failed to find bounding box for {source_name}")
-        return [], None
+                self.get_logger().info(f"Failed to find bounding box for {source_name}")
+        # return [], None
+        return bboxes, source_name
 
     def detect_fiducial_in_image(self, image, dim, source_name):
         """Detect the fiducial within a single image and return its bounding box."""
@@ -274,12 +291,14 @@ class RobotController(Node):
         detector = apriltag(family="tag36h11")
         detections = detector.detect(image_grey)
 
-        bboxes = []
+        bboxes = {}
         for i in range(len(detections)):
             # Draw the bounding box detection in the image.
             bbox = detections[i]["lb-rb-rt-lt"]
             cv2.polylines(image_grey, [np.int32(bbox)], True, (0, 0, 0), 2)
-            bboxes.append(bbox)
+            bbox_id = detections[i]["id"]
+            bboxes[bbox_id] = bbox
+            # bboxes.append(bbox)
 
         self._image[source_name] = image_grey
         return bboxes
@@ -313,15 +332,17 @@ class RobotController(Node):
         )
         return obj_points, img_pts
 
-    def pixel_coords_to_camera_coords(self, bbox, intrinsics, source_name):
+    def pixel_coords_to_camera_coords(self, bboxes, intrinsics, source_name):
         """Compute transformation of 2d pixel coordinates to 3d camera coordinates."""
         camera = self.make_camera_matrix(intrinsics)
         # Track a triplet of (translation vector, rotation vector, camera source name)
         best_bbox = (None, None, source_name)
         # The best bounding box is considered the closest to the robot body.
         closest_dist = float("inf")
-        for i in range(len(bbox)):
-            obj_points, img_points = self.bbox_to_image_object_pts(bbox[i])
+        self.get_logger().info(f"Bounding boxes:\n{bboxes}")
+        for id in bboxes:
+            self.get_logger().info(f"Bounding box: {bboxes[id]}")
+            obj_points, img_points = self.bbox_to_image_object_pts(bboxes[id])
             if self._camera_to_extrinsics_guess[source_name][0]:
                 # initialize the position estimate with the previous extrinsics solution
                 # then iteratively solve for new position
@@ -400,6 +421,9 @@ class RobotController(Node):
         )
         end_time = 5.0
         if self._powered_on:
+            self.get_logger().info(
+                f"Goal: {self._current_tag_world_pose[0], self._current_tag_world_pose[1]}"
+            )
             # Issue the command to the robot
             self._robot_command_client.robot_command(
                 lease=None, command=tag_cmd, end_time_secs=time.time() + end_time
@@ -427,7 +451,9 @@ class RobotController(Node):
                 and (y_dist < self._y_eps)
                 and (angle < self._angle_eps)
             ):
+                self.get_logger().info("Robot within range of the fiducial position")
                 return True
+        self.get_logger().info("Robot NOT within range of the fiducial position")
         return False
 
     def get_desired_angle(self, xhat):
@@ -600,7 +626,7 @@ class RobotController(Node):
                 and "depth" not in src.name
             )
         ]
-        print(self._source_names)
+        self.get_logger().info(f"List of camera sources: {self._source_names}")
 
         # Dictionary mapping camera source to previously computed extrinsics.
         self._camera_to_extrinsics_guess = self.populate_source_dict()
@@ -614,7 +640,7 @@ class RobotController(Node):
         try:
             self._lease_client.take()
             self.get_logger().info("LEASE WAS TAKEN")
-        except:
+        except Exception:
             self.get_logger().warn("LEASE COULD NOT BE TAKEN")
 
         # Create lease
@@ -626,7 +652,9 @@ class RobotController(Node):
         self._robot.time_sync.wait_for_sync()
 
         # Wait for motors to power on
-        self._robot.power_on()
+        self.get_logger().info("Powering on")
+        self.power_on()
+        # self._robot.power_on()
 
         dock_id = get_dock_id(self._robot)
         if dock_id is None:
@@ -646,7 +674,7 @@ def main():
     # Initalize ROS
     rclpy.init()
 
-    app = QApplication(sys.argv)
+    # QApplication(sys.argv)
 
     robot_controller = RobotController()
 
