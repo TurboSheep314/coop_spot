@@ -9,8 +9,18 @@ import os
 def generate_launch_description():
     return LaunchDescription(
         [
-            Node(package="coop_spot", executable="camera_controller"),
-            Node(package="coop_spot", executable="robot_controller"),
+            Node(
+                package="coop_spot",
+                executable="camera_controller",
+                output="screen",
+                emulate_tty=True,
+            ),
+            Node(
+                package="coop_spot",
+                executable="robot_controller",
+                output="screen",
+                emulate_tty=True,
+            ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     os.path.join(

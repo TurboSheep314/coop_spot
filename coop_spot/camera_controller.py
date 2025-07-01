@@ -8,6 +8,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import CompressedImage
 from rclpy.executors import MultiThreadedExecutor
+from std_msgs.msg import String
 
 # rosbags
 
@@ -55,6 +56,9 @@ class CameraProcessNode(Node):
 
     def __init__(self):
         super().__init__("camera_node")
+
+        # publish nearest tag
+        # self.closest_apriltag_pub = self.create_publisher(String, 'closest_tag', 10)
 
         # Create subscriber for images
         self.image_sub = self.create_subscription(
@@ -334,6 +338,15 @@ class CameraProcessNode(Node):
             self.proxtext.show()
         else:
             self.get_logger().info("TRYING TO DISPLAY IMAGE", throttle_duration_sec=1)
+        # publish closest tag ID
+        # if self.closest_tag is not None:
+        #    msg= String()
+        #    msg.data = "Closest tag is None"
+        #    self.closest_apriltag_pub.publish(msg)
+        # else:
+        #    msg= String()
+        #    msg.data = f"CLosest Tag ID: {self.closest_apriltag[0]}"
+        #    self.closest_apriltag_pub.publish(msg)
 
     def run(self, app):
         """Primary method, called from main function"""
