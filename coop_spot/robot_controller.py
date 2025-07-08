@@ -152,30 +152,30 @@ class RobotController(Node):
             self.get_logger().info(
                 f"Camera of the fiducial: {source_name}", throttle_duration_sec=3
             )
-            if bboxes:
-                for id in bboxes:
-                    self.get_logger().info(
-                        f"Bounding box ID: {id}", throttle_duration_sec=3
-                    )
-                    if id == 4:
-                        self.get_logger().info(
-                            "Detected table's fiducial!", throttle_duration_sec=3
-                        )
-                        detected_fiducial = True
-                        break
+        #     if bboxes:
+        #         for id in bboxes:
+        #             self.get_logger().info(
+        #                 f"Bounding box ID: {id}", throttle_duration_sec=3
+        #             )
+        #             if id == 4:
+        #                 self.get_logger().info(
+        #                     "Detected table's fiducial!", throttle_duration_sec=3
+        #                 )
+        #                 detected_fiducial = True
+        #                 break
 
-        if detected_fiducial:
-            # Go to the tag and stop within a certain distance
-            self.get_logger().info(
-                "Fiducial found, moving towards it...", throttle_duration_sec=3
-            )
-            self.go_to_tag(fiducial_rt_world)
-        else:
-            self.get_logger().info("No fiducials found", throttle_duration_sec=3)
+        # if detected_fiducial:
+        #     # Go to the tag and stop within a certain distance
+        #     self.get_logger().info(
+        #         "Fiducial found, moving towards it...", throttle_duration_sec=3
+        #     )
+        #     self.go_to_tag(fiducial_rt_world)
+        # else:
+        #     self.get_logger().info("No fiducials found", throttle_duration_sec=3)
 
-        # Power off at the conclusion of the example.
-        if self._powered_on:
-            self.power_off()
+        # # Power off at the conclusion of the example.
+        # if self._powered_on:
+        #     self.power_off()
 
     def stop_robot_callback(self, msg: Bool):
         """Activated when the /stop_robot_flag is called"""

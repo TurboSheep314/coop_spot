@@ -17,7 +17,10 @@ from PyQt5.QtWidgets import (
 from rclpy.executors import MultiThreadedExecutor
 from threading import Thread
 import sys
+
 # from apriltag import apriltag
+import json
+from pathlib import Path
 
 
 class calib(Node):
@@ -31,7 +34,7 @@ class calib(Node):
         self.T = []
         self.R = []
 
-        self.BASE_FRAME = "tag36h11:4"
+        self.BASE_FRAME = "tag36h11:60"
         self.CAM_FRAME = "zed2_base_link"
 
         self.FRAME_COUNT = 10
@@ -85,6 +88,22 @@ class calib(Node):
             self.get_logger().info(
                 f"transform is ['{trans[0]:.4f}', '{trans[1]:.4f}', '{trans[2]:.4f}'], ['{rot[0]:.4f}', '{rot[1]:.4f}', '{rot[2]:.4f}']"
             )
+
+            json_data = {
+                "tag36h11:map": {
+                    "v1": trans[0],
+                    "v2": trans[1],
+                    "v3": trans[2],
+                    "q1": rot[0],
+                    "q2": rot[1],
+                    "q3": rot[2],
+                }
+            }
+            saved_json = Path(
+                "/home/aicaring/ros2_dev/src/coop_spot/coop_spot/objects_data.json"
+            )
+            with open(saved_json, "w") as file:
+                json.dump(json_data, file, indent=4)
 
         # else:
         # self.get_logger().warn(f"I AM NOT WORKING BECAUSE MY CODE SUCKS")

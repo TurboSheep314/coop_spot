@@ -96,7 +96,7 @@ class CameraProcessNode(Node):
             4: {"name": "bowl", "present": False},
             2: {"name": "bleach", "present": False},
             43: {"name": "sponge", "present": False},
-            0: {"name": "table", "present": False},
+            60: {"name": "table", "present": False},
             12: {"name": "powder", "present": False},
         }
 
