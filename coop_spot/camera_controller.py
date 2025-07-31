@@ -2,19 +2,52 @@
 import sys
 from threading import Thread
 import math
+import time
+import os
 
 # ROS
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import CompressedImage
+from rclpy.action import ActionClient
+from sensor_msgs.msg import CompressedImage, Joy
 from rclpy.executors import MultiThreadedExecutor
-from std_msgs.msg import String
+from std_msgs.msg import String, Header, Bool, String, Int32
+from geometry_msgs.msg import (
+    TransformStamped,
+    Transform,
+    Vector3,
+    Quaternion,
+    PoseStamped,
+    Pose,
+    Point,
+    PoseArray,
+)
+from tf2_msgs.msg import TFMessage
+from tf2_ros.transform_listener import TransformListener
+from tf2_ros.buffer import Buffer
+from custom_actions.action import (
+    Gripper,
+    GraspObject,
+    ArmTagPose,
+    SendPose,
+    SendJointPose,
+    SendBool,
+    SendInt
+)
+
+
+from builtin_interfaces.msg import Time  # I dont know what this is but we need it
 
 # rosbags
 
 # Boston Dynamics
 
+from bosdyn.client.math_helpers import SE3Pose, Quat
+
+
 # Spot Driver
+from spot_msgs.msg import BatteryStateArray
+
 
 # PyQt5
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -56,6 +89,51 @@ class CameraProcessNode(Node):
 
     def __init__(self):
         super().__init__("camera_node")
+        # PUBLISHERS
+        self.grasp_tag_service_client = ActionClient(
+            self, SendInt, "fiducial_rt_world"
+        )
+        # Publish desired arm pose relative to body reference frame
+        self.desired_arm_body_pose_service_client = ActionClient(
+            self, SendPose, "desired_arm_body_pose"
+        )
+        self.desired_arm_body_pose_nc_service_client = ActionClient(
+            self, SendPose, "desired_arm_body_pose_nc"
+        )  # no calibration
+        # Publish desired arm joint position
+        self.desired_arm_joint_pose_service_client = ActionClient(
+            self, SendJointPose, "desired_arm_joint_pose"
+        )
+
+        # Publish desired arm pose trajectory relative to tag reference frame
+        self.desired_arm_tag_trajectory_service_client = ActionClient(
+            self, ArmTagPose, "desired_arm_tag_trajectory"
+        )
+
+        # Publish desired arm pose relative to tag reference frame
+        self.desired_arm_tag_pose_service_client = ActionClient(
+            self, SendPose, "desired_arm_tag_pose"
+        )
+
+        # Published object position so robot controller can grasp
+        self.grasp_object_service_client = ActionClient(
+            self, GraspObject, "grasp_object"
+        )
+
+        # Publish desired body pose relative to previous body reference frame
+        self.desired_body_pose_service_client = ActionClient(
+            self, SendPose, "desired_body_pose"
+        )
+
+        # Publish desired gripper state
+        self.gripper_service_client = ActionClient(
+            self, Gripper, "desired_gripper_state"
+        )
+        # publish nearest tag
+        # self.closest_apriltag_pub = self.create_publisher(String, 'closest_tag', 10)
+
+        # Stop/Warn Controller Input
+        self.create_subscription(Joy, "/joy", self.controller_input_callback, 1)
 
         # publish nearest tag
         # self.closest_apriltag_pub = self.create_publisher(String, 'closest_tag', 10)
@@ -102,8 +180,113 @@ class CameraProcessNode(Node):
 
         # GUI Intialization
         self.gui = QMainWindow()
-        self.initGUI()
         self.gui.show()
+        self.initGUI()
+
+
+    def controller_input_callback(self, msg):
+        if msg.buttons[1]:  # B
+            if self.stop_on:
+                pass
+            else:
+                self.get_logger().warn("SAVING INTERRUPT IMAGES")
+                basepath = "/home/aicaring/AICaring/LIFIdata"
+                if self.learned:
+                    filename = os.path.join(
+                        basepath,
+                        str(self.user_ID),
+                        str(self.trial_num)
+                        + "learned_warn_image_"
+                        + str(time.time())
+                        + ".png",
+                    )
+                else:
+                    filename = os.path.join(
+                        basepath,
+                        str(self.user_ID),
+                        str(self.trial_num)
+                        + "_warn_image_"
+                        + str(time.time())
+                        + ".png",
+                    )
+                if len(self.warn_images) > 0:
+                    self.save_image(filename, passed_image=self.warn_images[0])
+            self.spot_arm_calibrate_pos()
+            return
+        else:
+            self.stop_on = False
+
+        # if msg.buttons[2]: # X
+        #     self.warn_images.append(self.image)
+        #     if self.warn_on:
+        #         #self.get_logger().warn("warn already on")
+        #         pass
+        #     self.warn_on = True
+        # else:
+        #     if self.warn_on:
+        #         self.get_logger().warn("SAVING WARNING IMAGES")
+        #         basepath = "/home/aicaring/AICaring/LIFIdata"
+        #         if self.learned:
+        #             filename = os.path.join(basepath, str(self.user_ID), str(self.trial_num)+"learned_warn_image_"+str(time.time())+".png")
+        #         else:
+        #             filename = os.path.join(basepath, str(self.user_ID), str(self.trial_num)+"_warn_image_"+str(time.time())+".png")
+        #         if len(self.warn_images) > 0:
+        #             self.save_image(filename, passed_image=self.warn_images[0])
+        #         self.warn_images = []
+        #     self.warn_on = False
+
+    # def study_deploy(self):
+    #     self.get_logger().info("Started Study", throttle_duration_sec=3)
+    # # stand robot up
+    #     #self.sit_stand_spot(stand_flag = True)
+
+    #     # deploy spot to position
+    #     #self.spot_body_deploy()
+
+    #     # calibrate spot
+    #     self.spot_arm_calibrate_pos()
+
+    def spot_arm_calibrate_pos(self):
+        # this moves Spot's arm into the calibrate position
+
+        # ensures Spot's gripper is closed
+        self.get_logger().info("CLOSING GRIPPER", throttle_duration_sec=3)
+        message = Gripper.Goal()
+        message.gripper_state = True
+        self.gripper_service_client.wait_for_server()
+        self.gripper_service_client.send_goal_async(message)
+        self.get_logger().info("Gripper Closed", throttle_duration_sec=3)
+        # Create arm pose message
+        self.get_logger().info("MOVING ARM", throttle_duration_sec=3)
+        message = TransformStamped()
+        message.header = Header()
+        message.header.stamp = Time()
+        t = time.time()
+        message.header.stamp.sec = int(t)
+        message.header.stamp.nanosec = int((t - int(t)) * 1e9)
+        message.header.frame_id = "body"
+        message.transform = Transform()
+        message.transform.translation = Vector3()
+        message.transform.translation.x = 0.4
+        message.transform.translation.y = 0.0
+        message.transform.translation.z = 0.4
+        message.transform.rotation = Quaternion()
+        # message.transform.rotation.x = -0.028
+        # message.transform.rotation.y = 0.639
+        # message.transform.rotation.z = 0.033
+        # message.transform.rotation.w = 0.768
+        message.transform.rotation.x = 0.0
+        message.transform.rotation.y = 0.216
+        message.transform.rotation.z = 0.0
+        message.transform.rotation.w = 0.976
+        message.child_frame_id = "hand"
+
+        # Send the message to robot_controller
+        # self.desired_arm_body_pose_pub.publish(message)
+        msg = SendPose.Goal()
+        msg.pose = message
+        self.desired_arm_body_pose_nc_service_client.wait_for_server()
+        output = self.desired_arm_body_pose_nc_service_client.send_goal_async(msg)
 
     def initGUI(self):
         """Initializes basic GUI elements"""
@@ -115,6 +298,35 @@ class CameraProcessNode(Node):
         self.veltext.setGeometry(QtCore.QRect(100, 0, 800, 200))
         self.proxtext = QtWidgets.QLabel(self.gui)
         self.proxtext.setGeometry(QtCore.QRect(100, 100, 800, 200))
+
+        # --- Calibrate Spot Button --- #
+
+        self.cali_button = QtWidgets.QPushButton(self.gui)
+        self.cali_button.setGeometry(QtCore.QRect(700,0,800,50))
+        self.cali_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.cali_button.setObjectName("cali_button")
+        self.cali_button.setText("Calibrate Spot")
+        self.cali_button.clicked.connect(self.spot_arm_calibrate_pos)
+        self.cali_button.show()
+
+        # --- Grasp Object Spot Button ---
+        self.grasp_object_button = QtWidgets.QPushButton(self.gui)
+        self.grasp_object_button.setGeometry(QtCore.QRect(700,100,800,50))
+        self.grasp_object_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.grasp_object_button.setObjectName("grasp_object_button")
+        self.grasp_object_button.setText("Grasp Water")
+        self.grasp_object_button.clicked.connect(self.grasp_water)
+        self.grasp_object_button.show()
+
+    def grasp_water(self):
+        self.get_logger().info("Called Grasp Water")
+        msg = SendInt.Goal()
+        msg.data = 12
+        self.grasp_tag_service_client.wait_for_server()
+        output = self.grasp_tag_service_client.send_goal_async(msg)
+
 
     def set_image_callback(self, msg):
         """Callback for each new image captured by ZED Camera"""
@@ -325,7 +537,7 @@ class CameraProcessNode(Node):
                 self.window_height, self.window_width, Qt.KeepAspectRatio
             )
             label = QtWidgets.QLabel(self.gui)
-            label.setGeometry(QtCore.QRect(100, 100, 1200, 1200))
+            label.setGeometry(QtCore.QRect(100, 300, 1200, 1200))
             label.setPixmap(pixmap)
             label.show()
 
@@ -350,6 +562,7 @@ class CameraProcessNode(Node):
 
     def run(self, app):
         """Primary method, called from main function"""
+        
         while True:
             app.processEvents()
             self.update_image_callback()
