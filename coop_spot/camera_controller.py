@@ -32,7 +32,7 @@ from custom_actions.action import (
     SendPose,
     SendJointPose,
     SendBool,
-    SendInt
+    SendInt,
 )
 
 
@@ -75,6 +75,9 @@ from apriltag import apriltag
 # Data Collection
 import csv
 
+from .decision_making import simulation_loop
+import pyqtgraph as pg
+
 
 class CameraProcessNode(Node):
     """
@@ -90,9 +93,7 @@ class CameraProcessNode(Node):
     def __init__(self):
         super().__init__("camera_node")
         # PUBLISHERS
-        self.grasp_tag_service_client = ActionClient(
-            self, SendInt, "fiducial_rt_world"
-        )
+        self.grasp_tag_service_client = ActionClient(self, SendInt, "fiducial_rt_world")
         # Publish desired arm pose relative to body reference frame
         self.desired_arm_body_pose_service_client = ActionClient(
             self, SendPose, "desired_arm_body_pose"
@@ -180,9 +181,8 @@ class CameraProcessNode(Node):
 
         # GUI Intialization
         self.gui = QMainWindow()
-        self.gui.show()
         self.initGUI()
-
+        self.gui.show()
 
     def controller_input_callback(self, msg):
         if msg.buttons[1]:  # B
@@ -291,18 +291,27 @@ class CameraProcessNode(Node):
     def initGUI(self):
         """Initializes basic GUI elements"""
         self.gui.setWindowTitle("ZED camera")
-        self.window_height = 1200
-        self.window_width = 1400
+        self.window_height = 1400
+        self.window_width = 2000
         self.gui.resize(self.window_width, self.window_height)
+
+        # # Layouts to manage the GUI with grids
+        # self.bottom_row = QtWidgets.QWidget()
+        # self.top_row = = QtWidgets.QWidget()
+        # bottom_row_layout = QtWidgets.QGridLayout()
+        # self.bottom_row.setLayout(bottom_row_layout)
+        # top_row_layout = QtWidgets.QGridLayout()
+        # self.top_row.setLayout(top_row_layout)
+
         self.veltext = QtWidgets.QLabel(self.gui)
         self.veltext.setGeometry(QtCore.QRect(100, 0, 800, 200))
         self.proxtext = QtWidgets.QLabel(self.gui)
-        self.proxtext.setGeometry(QtCore.QRect(100, 100, 800, 200))
+        self.proxtext.setGeometry(QtCore.QRect(100, 50, 800, 200))
 
         # --- Calibrate Spot Button --- #
 
         self.cali_button = QtWidgets.QPushButton(self.gui)
-        self.cali_button.setGeometry(QtCore.QRect(700,0,800,50))
+        self.cali_button.setGeometry(QtCore.QRect(700, 50, 500, 50))
         self.cali_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.cali_button.setObjectName("cali_button")
@@ -312,7 +321,7 @@ class CameraProcessNode(Node):
 
         # --- Grasp Object Spot Button ---
         self.grasp_object_button = QtWidgets.QPushButton(self.gui)
-        self.grasp_object_button.setGeometry(QtCore.QRect(700,100,800,50))
+        self.grasp_object_button.setGeometry(QtCore.QRect(700, 150, 500, 50))
         self.grasp_object_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.grasp_object_button.setObjectName("grasp_object_button")
@@ -320,13 +329,53 @@ class CameraProcessNode(Node):
         self.grasp_object_button.clicked.connect(self.grasp_water)
         self.grasp_object_button.show()
 
+        # --- Plot ---
+        num_rounds = 10
+        reward_history = simulation_loop(num_rounds=num_rounds)
+        self.plot_graph = pg.PlotWidget(self.gui)
+        # self.setCentralWidget(self.plot_graph)
+        self.plot_graph.setBackground("#212946")
+        self.plot_graph.setTitle(
+            "Bandit Strategies: Boltzmann vs UCB1", color="w", size="14pt"
+        )
+        styles = {"color": "white", "font-size": "30px"}
+        self.plot_graph.setLabel("left", "Cumulative Reward", **styles)
+        self.plot_graph.setLabel("bottom", "Round", **styles)
+        self.plot_graph.addLegend()
+        self.plot_graph.showGrid(x=True, y=True)
+        # self.plot_graph.setYRange(20, 40)
+        # self.layout.addWidget(self.plot_graph, 0, 1, 3, 1)  # plot goes on right side, spanning 3 rows
+        self.plot_graph.setGeometry(QtCore.QRect(1400, 500, 1200, 800))
+        # cm = pg.colormap.get('Set2', source='matplotlib')
+        cm = [
+            "#08F7FE",  # teal/cyan
+            "#FE53BB",  # pink
+            "#F5D300",  # yellow
+            "#00ff41",  # matrix green
+        ]
+        self.Round = np.arange(0, num_rounds)
+        self.cum_reward = {}
+        self.line = {}
+        for idx, label in enumerate(reward_history):
+            pen = pg.mkPen(color=cm[idx])
+            self.cum_reward[label] = np.cumsum(reward_history[label])
+            self.line[label] = self.plot_graph.plot(
+                self.Round,
+                self.cum_reward[label],
+                name=label.capitalize(),
+                pen=pen,
+                # symbol="o",
+                # symbolSize=5,
+                # symbolBrush="b",
+            )
+        # self.plot_graph.show()
+
     def grasp_water(self):
         self.get_logger().info("Called Grasp Water")
         msg = SendInt.Goal()
         msg.data = 12
         self.grasp_tag_service_client.wait_for_server()
         output = self.grasp_tag_service_client.send_goal_async(msg)
-
 
     def set_image_callback(self, msg):
         """Callback for each new image captured by ZED Camera"""
@@ -562,7 +611,7 @@ class CameraProcessNode(Node):
 
     def run(self, app):
         """Primary method, called from main function"""
-        
+
         while True:
             app.processEvents()
             self.update_image_callback()

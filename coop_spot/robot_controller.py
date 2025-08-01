@@ -23,13 +23,33 @@ from tf2_ros import TFMessage
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 from transforms3d.euler import quat2euler, euler2quat
-from custom_actions.action import Gripper, GraspObject, ArmTagPose, SendPose, SendJointPose, SendBool, SendInt
+from custom_actions.action import (
+    Gripper,
+    GraspObject,
+    ArmTagPose,
+    SendPose,
+    SendJointPose,
+    SendBool,
+    SendInt,
+)
 from rclpy.executors import MultiThreadedExecutor
 
 
 # Boston Dynamics
 from bosdyn import geometry
-from bosdyn.api import geometry_pb2, image_pb2, trajectory_pb2, world_object_pb2, arm_command_pb2, robot_command_pb2, synchronized_command_pb2, gripper_command_pb2, arm_surface_contact_pb2, arm_surface_contact_service_pb2, manipulation_api_pb2
+from bosdyn.api import (
+    geometry_pb2,
+    image_pb2,
+    trajectory_pb2,
+    world_object_pb2,
+    arm_command_pb2,
+    robot_command_pb2,
+    synchronized_command_pb2,
+    gripper_command_pb2,
+    arm_surface_contact_pb2,
+    arm_surface_contact_service_pb2,
+    manipulation_api_pb2,
+)
 from bosdyn.api.geometry_pb2 import SE2Velocity, SE2VelocityLimit, Vec2
 from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
 from bosdyn.client import create_standard_sdk
@@ -38,14 +58,36 @@ from bosdyn.client.robot_id import RobotIdClient
 from bosdyn.client.power import PowerClient
 from bosdyn.client.image import ImageClient, build_image_request
 from bosdyn.client.robot_state import RobotStateClient
-from bosdyn.client.robot_command import RobotCommandClient, RobotCommandBuilder, blocking_stand, blocking_sit, block_until_arm_arrives, CommandFailedError
+from bosdyn.client.robot_command import (
+    RobotCommandClient,
+    RobotCommandBuilder,
+    blocking_stand,
+    blocking_sit,
+    block_until_arm_arrives,
+    CommandFailedError,
+)
 from bosdyn.client.world_object import WorldObjectClient
-from bosdyn.client.frame_helpers import BODY_FRAME_NAME, VISION_FRAME_NAME, get_a_tform_b, get_vision_tform_body, get_odom_tform_body, GRAV_ALIGNED_BODY_FRAME_NAME, ODOM_FRAME_NAME, HAND_FRAME_NAME, add_edge_to_tree
+from bosdyn.client.frame_helpers import (
+    BODY_FRAME_NAME,
+    VISION_FRAME_NAME,
+    get_a_tform_b,
+    get_vision_tform_body,
+    get_odom_tform_body,
+    GRAV_ALIGNED_BODY_FRAME_NAME,
+    ODOM_FRAME_NAME,
+    HAND_FRAME_NAME,
+    add_edge_to_tree,
+)
 from bosdyn.client.math_helpers import SE3Pose, Quat
 import bosdyn.client.util
 from bosdyn.util import seconds_to_duration
 from bosdyn.client.manipulation_api_client import ManipulationApiClient
-from bosdyn.client.docking import DockingClient, blocking_dock_robot, blocking_undock, get_dock_id
+from bosdyn.client.docking import (
+    DockingClient,
+    blocking_dock_robot,
+    blocking_undock,
+    get_dock_id,
+)
 from bosdyn.client.arm_surface_contact import ArmSurfaceContactClient
 
 
@@ -88,17 +130,33 @@ class RobotController(Node):
         # Subscriptions/Flags
 
         # Listen to desired arm pose relative to the body reference frame
-        self.desired_arm_body_pose_service = ActionServer(self, SendPose, "desired_arm_body_pose", self.desired_arm_body_pose_callback)
-        self.desired_arm_body_pose_nc_service = ActionServer(self, SendPose, "desired_arm_body_pose_nc", self.desired_arm_body_pose_nc_callback) #no calibration
+        self.desired_arm_body_pose_service = ActionServer(
+            self, SendPose, "desired_arm_body_pose", self.desired_arm_body_pose_callback
+        )
+        self.desired_arm_body_pose_nc_service = ActionServer(
+            self,
+            SendPose,
+            "desired_arm_body_pose_nc",
+            self.desired_arm_body_pose_nc_callback,
+        )  # no calibration
 
-        # Listen to desired arm joint pose 
-        self.desired_arm_joint_pose_service = ActionServer(self, SendJointPose, "desired_arm_joint_pose", self.desired_arm_joint_pose_callback)
+        # Listen to desired arm joint pose
+        self.desired_arm_joint_pose_service = ActionServer(
+            self,
+            SendJointPose,
+            "desired_arm_joint_pose",
+            self.desired_arm_joint_pose_callback,
+        )
 
         # Listen to desired arm pose relative to the april tag reference frame
-        self.arm_tag_pose_service = ActionServer(self, SendPose, "desired_arm_tag_pose", self.desired_arm_tag_pose_callback)
+        self.arm_tag_pose_service = ActionServer(
+            self, SendPose, "desired_arm_tag_pose", self.desired_arm_tag_pose_callback
+        )
 
         # Listen to desired arm pose relative to the april tag reference frame
-        self.arm_grasp_tag_service = ActionServer(self, SendInt, "fiducial_rt_world", self.grasp_tag)
+        self.arm_grasp_tag_service = ActionServer(
+            self, SendInt, "fiducial_rt_world", self.grasp_tag
+        )
 
         # Publish any transforms
         self.tf_pub = self.create_publisher(TFMessage, "/tf", 1)
@@ -108,13 +166,15 @@ class RobotController(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # Listen to desired gripper state 0 -> open, 1 -> closed
-        self.gripper_service = ActionServer(self, Gripper, "desired_gripper_state", self.desired_gripper_state_callback)
+        self.gripper_service = ActionServer(
+            self, Gripper, "desired_gripper_state", self.desired_gripper_state_callback
+        )
 
         # Stop robot command
-        self.create_subscription(Bool, '/stop_robot_flag', self.stop_robot_callback, 1)
+        self.create_subscription(Bool, "/stop_robot_flag", self.stop_robot_callback, 1)
         self.stop_robot_flag = False
         self.stop_on = False
-        
+
         self.setup_robot()
 
         # Dictionary mapping camera source to it's latest image taken.
@@ -138,7 +198,6 @@ class RobotController(Node):
 
         # Calibration
         self.calibration_timer = self.create_timer(5, self.calibration_timer_callback)
-
 
     @property
     def robot_state(self):
@@ -165,57 +224,68 @@ class RobotController(Node):
         return camera_to_extrinsics_guess
 
     def calibration_timer_callback(self):
-                
         # Make sure previous transform exists
         try:
-            if self.body_tform_reference and self.odom_tform_reference and self.vision_tform_reference:
+            if (
+                self.body_tform_reference
+                and self.odom_tform_reference
+                and self.vision_tform_reference
+            ):
                 pass
         except:
             return
-    
+
         # self.get_logger().info(f"Publishing last reference calibration TF.")
 
         # Create body_tform_reference
-        tfm1 = self.SE3Pose_to_TransformStamped(self.vision_tform_reference, "vision", "spot_reference")
+        tfm1 = self.SE3Pose_to_TransformStamped(
+            self.vision_tform_reference, "vision", "spot_reference"
+        )
 
         # Create map_tform_odom
-        tfm2 = self.SE3Pose_to_TransformStamped(self.odom_tform_reference.inverse(), "map", "odom")
+        tfm2 = self.SE3Pose_to_TransformStamped(
+            self.odom_tform_reference.inverse(), "map", "odom"
+        )
 
         # Create map_tform_odom
-        #tfm3 = self.SE3Pose_to_TransformStamped(self.vision_tform_reference.inverse(), "map", "vision")
+        # tfm3 = self.SE3Pose_to_TransformStamped(self.vision_tform_reference.inverse(), "map", "vision")
 
         # robot_state_transforms = self.robot_state_client.get_robot_state().kinematic_state.transforms_snapshot
         # map_tform_odom = get_a_tform_b(robot_state_transforms, "map", ODOM_FRAME_NAME)
         # self.get_logger().warn(str(map_tform_odom))
 
         # Publish message
-        self.tf_pub.publish(TFMessage(
-            transforms=[tfm1, tfm2]))
+        self.tf_pub.publish(TFMessage(transforms=[tfm1, tfm2]))
 
     def desired_arm_body_pose_nc_callback(self, goal_handle):
-
         msg = goal_handle.request.pose
-        
+
         if not self.stop_robot_flag:
             # Create transform from message
-            body_tform_hand = SE3Pose(x = msg.transform.translation.x, 
-                            y = msg.transform.translation.y, 
-                            z = msg.transform.translation.z, 
-                            rot = Quat(w = msg.transform.rotation.w, 
-                                        x = msg.transform.rotation.x,
-                                        y = msg.transform.rotation.y,
-                                        z = msg.transform.rotation.z))
-            
+            body_tform_hand = SE3Pose(
+                x=msg.transform.translation.x,
+                y=msg.transform.translation.y,
+                z=msg.transform.translation.z,
+                rot=Quat(
+                    w=msg.transform.rotation.w,
+                    x=msg.transform.rotation.x,
+                    y=msg.transform.rotation.y,
+                    z=msg.transform.rotation.z,
+                ),
+            )
+
             # Create arm command from transform
-            arm_command = RobotCommandBuilder.arm_pose_command(x = body_tform_hand.x,
-                                                            y = body_tform_hand.y,
-                                                            z = body_tform_hand.z,
-                                                            qw = body_tform_hand.rot.w,
-                                                            qx = body_tform_hand.rot.x,
-                                                            qy = body_tform_hand.rot.y,
-                                                            qz = body_tform_hand.rot.z,
-                                                            frame_name = BODY_FRAME_NAME, 
-                                                            seconds=5)
+            arm_command = RobotCommandBuilder.arm_pose_command(
+                x=body_tform_hand.x,
+                y=body_tform_hand.y,
+                z=body_tform_hand.z,
+                qw=body_tform_hand.rot.w,
+                qx=body_tform_hand.rot.x,
+                qy=body_tform_hand.rot.y,
+                qz=body_tform_hand.rot.z,
+                frame_name=BODY_FRAME_NAME,
+                seconds=5,
+            )
             arm_command.synchronized_command.arm_command.arm_cartesian_command.max_linear_velocity.value = self.max_arm_lin_vel
             arm_command.synchronized_command.arm_command.arm_cartesian_command.max_angular_velocity.value = self.max_arm_ang_vel
             arm_command.synchronized_command.arm_command.arm_cartesian_command.maximum_acceleration.value = self.max_arm_accel
@@ -223,14 +293,16 @@ class RobotController(Node):
             # Send arm command to robot
             cmd_id = self.robot_command_client.robot_command(arm_command)
 
-            output = self.block_until_arm_arrives_interruptable(self.robot_command_client, cmd_id, timeout_sec=5)
+            output = self.block_until_arm_arrives_interruptable(
+                self.robot_command_client, cmd_id, timeout_sec=5
+            )
 
             self.get_logger().info("CALIBRATE ARM MOVE COMPLETE")
-            
-            #message = Bool()
-            #message.data = True
-            #self.stop_robot_callback(message)
-            
+
+            # message = Bool()
+            # message.data = True
+            # self.stop_robot_callback(message)
+
             goal_handle.succeed()
             result = SendPose.Result()
             result.success = output
@@ -243,29 +315,34 @@ class RobotController(Node):
             return result
 
     def desired_arm_body_pose_callback(self, goal_handle):
-
         msg = goal_handle.request.pose
-        
+
         if not self.stop_robot_flag:
             # Create transform from message
-            body_tform_hand = SE3Pose(x = msg.transform.translation.x, 
-                            y = msg.transform.translation.y, 
-                            z = msg.transform.translation.z, 
-                            rot = Quat(w = msg.transform.rotation.w, 
-                                        x = msg.transform.rotation.x,
-                                        y = msg.transform.rotation.y,
-                                        z = msg.transform.rotation.z))
-            
+            body_tform_hand = SE3Pose(
+                x=msg.transform.translation.x,
+                y=msg.transform.translation.y,
+                z=msg.transform.translation.z,
+                rot=Quat(
+                    w=msg.transform.rotation.w,
+                    x=msg.transform.rotation.x,
+                    y=msg.transform.rotation.y,
+                    z=msg.transform.rotation.z,
+                ),
+            )
+
             # Create arm command from transform
-            arm_command = RobotCommandBuilder.arm_pose_command(x = body_tform_hand.x,
-                                                            y = body_tform_hand.y,
-                                                            z = body_tform_hand.z,
-                                                            qw = body_tform_hand.rot.w,
-                                                            qx = body_tform_hand.rot.x,
-                                                            qy = body_tform_hand.rot.y,
-                                                            qz = body_tform_hand.rot.z,
-                                                            frame_name = BODY_FRAME_NAME, 
-                                                            seconds=5)
+            arm_command = RobotCommandBuilder.arm_pose_command(
+                x=body_tform_hand.x,
+                y=body_tform_hand.y,
+                z=body_tform_hand.z,
+                qw=body_tform_hand.rot.w,
+                qx=body_tform_hand.rot.x,
+                qy=body_tform_hand.rot.y,
+                qz=body_tform_hand.rot.z,
+                frame_name=BODY_FRAME_NAME,
+                seconds=5,
+            )
             arm_command.synchronized_command.arm_command.arm_cartesian_command.max_linear_velocity.value = self.max_arm_lin_vel
             arm_command.synchronized_command.arm_command.arm_cartesian_command.max_angular_velocity.value = self.max_arm_ang_vel
             arm_command.synchronized_command.arm_command.arm_cartesian_command.maximum_acceleration.value = self.max_arm_accel
@@ -273,7 +350,9 @@ class RobotController(Node):
             # Send arm command to robot
             cmd_id = self.robot_command_client.robot_command(arm_command)
 
-            output = self.block_until_arm_arrives_interruptable(self.robot_command_client, cmd_id, timeout_sec=5)
+            output = self.block_until_arm_arrives_interruptable(
+                self.robot_command_client, cmd_id, timeout_sec=5
+            )
 
             self.get_logger().info("CALIBRATE ARM MOVE COMPLETE")
             goal_handle.succeed()
@@ -282,7 +361,7 @@ class RobotController(Node):
 
             for i in range(3):
                 self.calibrate_spot_to_reference()
-                time.sleep(.5)
+                time.sleep(0.5)
 
             return result
         else:
@@ -292,35 +371,39 @@ class RobotController(Node):
             return result
 
     def desired_arm_tag_pose_callback(self, goal_handle):
-
         msg = goal_handle.request.pose
 
         if not self.stop_robot_flag:
             # Create transform from message
-            ref_tform_hand = SE3Pose(x = msg.transform.translation.x, 
-                            y = msg.transform.translation.y, 
-                            z = msg.transform.translation.z, 
-                            rot = Quat(w = msg.transform.rotation.w, 
-                                        x = msg.transform.rotation.x,
-                                        y = msg.transform.rotation.y,
-                                        z = msg.transform.rotation.z))
-            
-            #odom_tform_hand = self.odom_tform_reference * ref_tform_hand
+            ref_tform_hand = SE3Pose(
+                x=msg.transform.translation.x,
+                y=msg.transform.translation.y,
+                z=msg.transform.translation.z,
+                rot=Quat(
+                    w=msg.transform.rotation.w,
+                    x=msg.transform.rotation.x,
+                    y=msg.transform.rotation.y,
+                    z=msg.transform.rotation.z,
+                ),
+            )
+
+            # odom_tform_hand = self.odom_tform_reference * ref_tform_hand
             vision_tform_hand = self.vision_tform_reference * ref_tform_hand
-            
-            
-            #body_tform_hand = self.body_tform_reference * ref_tform_hand
-            
+
+            # body_tform_hand = self.body_tform_reference * ref_tform_hand
+
             # Create arm command from transform
-            arm_command = RobotCommandBuilder.arm_pose_command(x = vision_tform_hand.x,
-                                                            y = vision_tform_hand.y,
-                                                            z = vision_tform_hand.z,
-                                                            qw = vision_tform_hand.rot.w,
-                                                            qx = vision_tform_hand.rot.x,
-                                                            qy = vision_tform_hand.rot.y,
-                                                            qz = vision_tform_hand.rot.z,
-                                                            frame_name = VISION_FRAME_NAME, 
-                                                            seconds=5)
+            arm_command = RobotCommandBuilder.arm_pose_command(
+                x=vision_tform_hand.x,
+                y=vision_tform_hand.y,
+                z=vision_tform_hand.z,
+                qw=vision_tform_hand.rot.w,
+                qx=vision_tform_hand.rot.x,
+                qy=vision_tform_hand.rot.y,
+                qz=vision_tform_hand.rot.z,
+                frame_name=VISION_FRAME_NAME,
+                seconds=5,
+            )
             arm_command.synchronized_command.arm_command.arm_cartesian_command.max_linear_velocity.value = self.max_arm_lin_vel
             arm_command.synchronized_command.arm_command.arm_cartesian_command.max_angular_velocity.value = self.max_arm_ang_vel
             arm_command.synchronized_command.arm_command.arm_cartesian_command.maximum_acceleration.value = self.max_arm_accel
@@ -328,7 +411,9 @@ class RobotController(Node):
             # Send arm command to robot
             cmd_id = self.robot_command_client.robot_command(arm_command)
 
-            output = self.block_until_arm_arrives_interruptable(self.robot_command_client, cmd_id, timeout_sec=5)
+            output = self.block_until_arm_arrives_interruptable(
+                self.robot_command_client, cmd_id, timeout_sec=5
+            )
 
             self.get_logger().info("ARM TAG POSE MOVE COMPLETE")
             goal_handle.succeed()
@@ -342,7 +427,6 @@ class RobotController(Node):
             return result
 
     def desired_arm_joint_pose_callback(self, goal_handle):
-        
         msg = goal_handle.request.jointstate
 
         if not self.stop_robot_flag:
@@ -354,19 +438,31 @@ class RobotController(Node):
             wr0 = arm_joint_positions[4]
             wr1 = arm_joint_positions[5]
 
-            traj_point = RobotCommandBuilder.create_arm_joint_trajectory_point(sh0, sh1, el0, el1, wr0, wr1)
+            traj_point = RobotCommandBuilder.create_arm_joint_trajectory_point(
+                sh0, sh1, el0, el1, wr0, wr1
+            )
             arm_joint_traj = arm_command_pb2.ArmJointTrajectory(points=[traj_point])
             arm_joint_traj.maximum_velocity.value = self.max_arm_joint_vel
 
-            joint_move_command = arm_command_pb2.ArmJointMoveCommand.Request(trajectory=arm_joint_traj)
+            joint_move_command = arm_command_pb2.ArmJointMoveCommand.Request(
+                trajectory=arm_joint_traj
+            )
 
-            arm_command = arm_command_pb2.ArmCommand.Request(arm_joint_move_command=joint_move_command)
-            sync_arm = synchronized_command_pb2.SynchronizedCommand.Request(arm_command=arm_command)
-            arm_sync_robot_cmd = robot_command_pb2.RobotCommand(synchronized_command=sync_arm)
+            arm_command = arm_command_pb2.ArmCommand.Request(
+                arm_joint_move_command=joint_move_command
+            )
+            sync_arm = synchronized_command_pb2.SynchronizedCommand.Request(
+                arm_command=arm_command
+            )
+            arm_sync_robot_cmd = robot_command_pb2.RobotCommand(
+                synchronized_command=sync_arm
+            )
             command = RobotCommandBuilder.build_synchro_command(arm_sync_robot_cmd)
 
             cmd_id = self.robot_command_client.robot_command(command)
-            output = self.block_until_arm_arrives_interruptable(self.robot_command_client, cmd_id, timeout_sec=5)
+            output = self.block_until_arm_arrives_interruptable(
+                self.robot_command_client, cmd_id, timeout_sec=5
+            )
 
             self.get_logger().info("STOW ARM COMPLETE")
             goal_handle.succeed()
@@ -382,7 +478,9 @@ class RobotController(Node):
     def desired_gripper_state_callback(self, goal_handle):
         # 0 -> open, 1 -> closed
 
-        self.get_logger().info("GRIPPER MESSAGE: "+str(goal_handle.request.gripper_state))
+        self.get_logger().info(
+            "GRIPPER MESSAGE: " + str(goal_handle.request.gripper_state)
+        )
 
         if self.stop_robot_flag:
             output = False
@@ -392,7 +490,6 @@ class RobotController(Node):
 
             self.get_logger().error("ROBOT STOPPED - GRIPPER COMMAND STOPPED")
         else:
-
             # Desired closed
             if goal_handle.request.gripper_state:
                 gripper_command = RobotCommandBuilder.claw_gripper_close_command()
@@ -403,14 +500,16 @@ class RobotController(Node):
             # Send gripper command to robot
             cmd_id = self.robot_command_client.robot_command(gripper_command)
 
-            output = self.block_until_gripper_arrives(self.robot_command_client, cmd_id, timeout_sec=2)
+            output = self.block_until_gripper_arrives(
+                self.robot_command_client, cmd_id, timeout_sec=2
+            )
 
             goal_handle.succeed()
 
             result = Gripper.Result()
             result.success = output
 
-            self.get_logger().info("GRIPPER CMD RETURN: "+str(output))
+            self.get_logger().info("GRIPPER CMD RETURN: " + str(output))
 
         return result
 
@@ -480,7 +579,7 @@ class RobotController(Node):
         else:
             self.stop_on = False
 
-    def block_until_gripper_arrives(self, command_client, cmd_id, timeout_sec = None):
+    def block_until_gripper_arrives(self, command_client, cmd_id, timeout_sec=None):
         # returns when the gripper command is complete or time to complete the command runs out
         # also is interruptable: stops when robot is interrupted
 
@@ -491,21 +590,30 @@ class RobotController(Node):
 
         while timeout_sec is None or now < end_time:
             feedback_resp = command_client.robot_command_feedback(cmd_id)
-            gripper_feedback = feedback_resp.feedback.synchronized_feedback.gripper_command_feedback
+            gripper_feedback = (
+                feedback_resp.feedback.synchronized_feedback.gripper_command_feedback
+            )
 
             if gripper_feedback.HasField("claw_gripper_feedback"):
-                if gripper_feedback.claw_gripper_feedback.status == gripper_command_pb2.ClawGripperCommand.Feedback.STATUS_AT_GOAL:
+                if (
+                    gripper_feedback.claw_gripper_feedback.status
+                    == gripper_command_pb2.ClawGripperCommand.Feedback.STATUS_AT_GOAL
+                ):
                     return True
-                
+
             if self.stop_robot_flag:
-                self.get_logger().error("ROBOT STOPPED - BLOCKING GRIPPER COMMAND INTERRUPTED")
+                self.get_logger().error(
+                    "ROBOT STOPPED - BLOCKING GRIPPER COMMAND INTERRUPTED"
+                )
                 break
 
             time.sleep(0.1)
             now = time.time()
         return False
-    
-    def block_until_arm_arrives_interruptable(self, command_client, cmd_id, timeout_sec=None):
+
+    def block_until_arm_arrives_interruptable(
+        self, command_client, cmd_id, timeout_sec=None
+    ):
         """Helper that blocks until the arm achieves a finishing state for the specific arm command.
 
         This helper will block and check the feedback for ArmCartesianCommand, GazeCommand,
@@ -519,7 +627,7 @@ class RobotController(Node):
 
         Return values:
             True if successfully got to the end of the trajectory, False if the arm stalled or
-            the move was canceled (the arm failed to reach the goal). See the proto definitions in 
+            the move was canceled (the arm failed to reach the goal). See the proto definitions in
             arm_command.proto for more information about why a trajectory would succeed or fail.
         """
         if timeout_sec is not None:
@@ -529,34 +637,68 @@ class RobotController(Node):
 
         while timeout_sec is None or now < end_time:
             feedback_resp = command_client.robot_command_feedback(cmd_id)
-            arm_feedback = feedback_resp.feedback.synchronized_feedback.arm_command_feedback
+            arm_feedback = (
+                feedback_resp.feedback.synchronized_feedback.arm_command_feedback
+            )
 
             if arm_feedback.HasField("arm_cartesian_feedback"):
-                if arm_feedback.arm_cartesian_feedback.status == arm_command_pb2.ArmCartesianCommand.Feedback.STATUS_TRAJECTORY_COMPLETE:
+                if (
+                    arm_feedback.arm_cartesian_feedback.status
+                    == arm_command_pb2.ArmCartesianCommand.Feedback.STATUS_TRAJECTORY_COMPLETE
+                ):
                     return True
-                elif arm_feedback.arm_cartesian_feedback.status == arm_command_pb2.ArmCartesianCommand.Feedback.STATUS_TRAJECTORY_STALLED or feedback_resp.feedback.synchronized_feedback.arm_command_feedback.arm_cartesian_feedback.status == arm_command_pb2.ArmCartesianCommand.Feedback.STATUS_TRAJECTORY_CANCELLED:
+                elif (
+                    arm_feedback.arm_cartesian_feedback.status
+                    == arm_command_pb2.ArmCartesianCommand.Feedback.STATUS_TRAJECTORY_STALLED
+                    or feedback_resp.feedback.synchronized_feedback.arm_command_feedback.arm_cartesian_feedback.status
+                    == arm_command_pb2.ArmCartesianCommand.Feedback.STATUS_TRAJECTORY_CANCELLED
+                ):
                     return False
             elif arm_feedback.HasField("arm_gaze_feedback"):
-                if arm_feedback.arm_gaze_feedback.status == arm_command_pb2.GazeCommand.Feedback.STATUS_TRAJECTORY_COMPLETE:
+                if (
+                    arm_feedback.arm_gaze_feedback.status
+                    == arm_command_pb2.GazeCommand.Feedback.STATUS_TRAJECTORY_COMPLETE
+                ):
                     return True
-                elif arm_feedback.arm_gaze_feedback.status == arm_command_pb2.GazeCommand.Feedback.STATUS_TOOL_TRAJECTORY_STALLED:
+                elif (
+                    arm_feedback.arm_gaze_feedback.status
+                    == arm_command_pb2.GazeCommand.Feedback.STATUS_TOOL_TRAJECTORY_STALLED
+                ):
                     return False
             elif arm_feedback.HasField("arm_joint_move_feedback"):
-                if arm_feedback.arm_joint_move_feedback.status == arm_command_pb2.ArmJointMoveCommand.Feedback.STATUS_COMPLETE:
+                if (
+                    arm_feedback.arm_joint_move_feedback.status
+                    == arm_command_pb2.ArmJointMoveCommand.Feedback.STATUS_COMPLETE
+                ):
                     return True
-                elif arm_feedback.arm_joint_move_feedback.status == arm_command_pb2.ArmJointMoveCommand.Feedback.STATUS_STALLED:
+                elif (
+                    arm_feedback.arm_joint_move_feedback.status
+                    == arm_command_pb2.ArmJointMoveCommand.Feedback.STATUS_STALLED
+                ):
                     return False
             elif arm_feedback.HasField("named_arm_position_feedback"):
-                if arm_feedback.named_arm_position_feedback.status == arm_command_pb2.NamedArmPositionsCommand.Feedback.STATUS_COMPLETE:
+                if (
+                    arm_feedback.named_arm_position_feedback.status
+                    == arm_command_pb2.NamedArmPositionsCommand.Feedback.STATUS_COMPLETE
+                ):
                     return True
-                elif arm_feedback.named_arm_position_feedback.status == arm_command_pb2.NamedArmPositionsCommand.Feedback.STATUS_STALLED_HOLDING_ITEM:
+                elif (
+                    arm_feedback.named_arm_position_feedback.status
+                    == arm_command_pb2.NamedArmPositionsCommand.Feedback.STATUS_STALLED_HOLDING_ITEM
+                ):
                     return False
             elif arm_feedback.HasField("arm_impedance_feedback"):
-                if arm_feedback.arm_impedance_feedback.status == arm_command_pb2.ArmImpedanceCommand.Feedback.STATUS_TRAJECTORY_COMPLETE:
+                if (
+                    arm_feedback.arm_impedance_feedback.status
+                    == arm_command_pb2.ArmImpedanceCommand.Feedback.STATUS_TRAJECTORY_COMPLETE
+                ):
                     return True
-                elif arm_feedback.arm_impedance_feedback.status == arm_command_pb2.ArmImpedanceCommand.Feedback.STATUS_TRAJECTORY_STALLED:
+                elif (
+                    arm_feedback.arm_impedance_feedback.status
+                    == arm_command_pb2.ArmImpedanceCommand.Feedback.STATUS_TRAJECTORY_STALLED
+                ):
                     return False
-                
+
             if self.stop_robot_flag:
                 self.get_logger().error("ROBOT STOPPED - BLOCKING COMMAND INTERRUPTED")
                 break
@@ -636,7 +778,7 @@ class RobotController(Node):
             )
             if bboxes:
                 self.get_logger().info(f"Found bounding box for {source_name}")
-                #return bboxes, source_name
+                # return bboxes, source_name
             else:
                 self.tag_not_located = True
                 self.get_logger().info(f"Failed to find bounding box for {source_name}")
@@ -647,7 +789,10 @@ class RobotController(Node):
         """Detect the fiducial within a single image and return its bounding box."""
         image_grey = np.array(
             Image.frombytes(
-                "P", (int(dim[0]), int(dim[1])), data=image.shot.image.data, decoder_name="raw"
+                "P",
+                (int(dim[0]), int(dim[1])),
+                data=image.shot.image.data,
+                decoder_name="raw",
             )
         )
 
@@ -661,7 +806,7 @@ class RobotController(Node):
         for i in range(len(detections)):
             # Draw the bounding box detection in the image.
             bbox = detections[i]["lb-rb-rt-lt"]
-            
+
             cv2.polylines(image_grey, [np.int32(bbox)], True, (0, 0, 0), 2)
             bbox_id = detections[i]["id"]
             bboxes[bbox_id] = bbox
@@ -787,43 +932,53 @@ class RobotController(Node):
 
         # Build the proto
         grasp = manipulation_api_pb2.PickObjectInImage(
-            pixel_xy=pick_vec, transforms_snapshot_for_camera=image.shot.transforms_snapshot,
+            pixel_xy=pick_vec,
+            transforms_snapshot_for_camera=image.shot.transforms_snapshot,
             frame_name_image_sensor=image.shot.frame_name_image_sensor,
-            camera_model=image.source.pinhole)
+            camera_model=image.source.pinhole,
+        )
 
         # Ask the robot to pick up the object
-        grasp_request = manipulation_api_pb2.ManipulationApiRequest(pick_object_in_image=grasp)
+        grasp_request = manipulation_api_pb2.ManipulationApiRequest(
+            pick_object_in_image=grasp
+        )
 
         # Send the request
         cmd_response = self.manipulation_api_client.manipulation_api_command(
-            manipulation_api_request=grasp_request)
+            manipulation_api_request=grasp_request
+        )
 
         # Get feedback from the robot
         while True:
             feedback_request = manipulation_api_pb2.ManipulationApiFeedbackRequest(
-                manipulation_cmd_id=cmd_response.manipulation_cmd_id)
+                manipulation_cmd_id=cmd_response.manipulation_cmd_id
+            )
 
             # Send the request
             response = self.manipulation_api_client.manipulation_api_feedback_command(
-                manipulation_api_feedback_request=feedback_request)
-
-            print(
-                f'Current state: {manipulation_api_pb2.ManipulationFeedbackState.Name(response.current_state)}'
+                manipulation_api_feedback_request=feedback_request
             )
 
-            if response.current_state == manipulation_api_pb2.MANIP_STATE_GRASP_SUCCEEDED or response.current_state == manipulation_api_pb2.MANIP_STATE_GRASP_FAILED:
+            print(
+                f"Current state: {manipulation_api_pb2.ManipulationFeedbackState.Name(response.current_state)}"
+            )
+
+            if (
+                response.current_state
+                == manipulation_api_pb2.MANIP_STATE_GRASP_SUCCEEDED
+                or response.current_state
+                == manipulation_api_pb2.MANIP_STATE_GRASP_FAILED
+            ):
                 break
 
             time.sleep(0.25)
 
-        self.get_logger().info('Finished grasp.')
+        self.get_logger().info("Finished grasp.")
         time.sleep(4.0)
 
         result = SendInt.Result()
         result.success = True
         return result
-
-        
 
     def go_to_tag(self, fiducial_rt_world):
         """Use the position of the april tag in vision world frame and command the robot."""
@@ -969,7 +1124,9 @@ class RobotController(Node):
 
         # Setup clients
 
-        self.manipulation_api_client = self.robot.ensure_client(ManipulationApiClient.default_service_name)
+        self.manipulation_api_client = self.robot.ensure_client(
+            ManipulationApiClient.default_service_name
+        )
         self.lease_client = self.robot.ensure_client(LeaseClient.default_service_name)
         self.power_client = self.robot.ensure_client(PowerClient.default_service_name)
         self.img_client = self.robot.ensure_client(ImageClient.default_service_name)
@@ -1095,364 +1252,450 @@ class RobotController(Node):
 
 
 def grasp_object_callback(self, goal_handle):
-        # Provide the position of the goal tag
+    # Provide the position of the goal tag
 
-        self.record_flag = True
+    self.record_flag = True
 
-        self.timings['grasp_start'] = time.time()
-        
-        msg = goal_handle.request.pose
+    self.timings["grasp_start"] = time.time()
 
-        #self.get_logger().warn("______________________")
-        #self.get_logger().warn("______________________")
-        #self.get_logger().warn("______________________")
-        #self.get_logger().warn(str(msg.transform.translation.x))
-        #self.get_logger().warn(str(msg.transform.translation.y))
-        #self.get_logger().warn(str(msg.transform.translation.z))
+    msg = goal_handle.request.pose
 
-        self.object_name = msg.child_frame_id
+    # self.get_logger().warn("______________________")
+    # self.get_logger().warn("______________________")
+    # self.get_logger().warn("______________________")
+    # self.get_logger().warn(str(msg.transform.translation.x))
+    # self.get_logger().warn(str(msg.transform.translation.y))
+    # self.get_logger().warn(str(msg.transform.translation.z))
 
-        if self.stop_robot_flag:
-            self.get_logger().error("ROBOT STOPPED - GRASP OBJECT STOPPED")
+    self.object_name = msg.child_frame_id
 
-            result = GraspObject.Result()
-            result.success = False
-            return result
+    if self.stop_robot_flag:
+        self.get_logger().error("ROBOT STOPPED - GRASP OBJECT STOPPED")
 
-        try:
-            self.vision_tform_reference
-        except:
-            self.get_logger().warn("SPOT NOT CALIBRATED")
+        result = GraspObject.Result()
+        result.success = False
+        return result
 
-            result = GraspObject.Result()
-            result.success = False
-            return result
+    try:
+        self.vision_tform_reference
+    except:
+        self.get_logger().warn("SPOT NOT CALIBRATED")
 
-        # Create transform from message
-        reference_tform_object = SE3Pose(x = msg.transform.translation.x, 
-                           y = msg.transform.translation.y, 
-                           z = msg.transform.translation.z, 
-                           rot = Quat(w = msg.transform.rotation.w, 
-                                      x = msg.transform.rotation.x,
-                                      y = msg.transform.rotation.y,
-                                      z = msg.transform.rotation.z))
-        # Look up euler angles
-        axis = quat2euler([msg.transform.rotation.w, 
-                          msg.transform.rotation.x, 
-                          msg.transform.rotation.y, 
-                          msg.transform.rotation.z])
+        result = GraspObject.Result()
+        result.success = False
+        return result
 
-        self.get_logger().info(f"AXIS: {axis}")
-            
-        def quadrant(num):
-            if np.pi/4 < num < 3*np.pi/4:
-                return 4
-            elif 0 < num < np.pi/4 or -np.pi/4 < num < 0:
-                return 3
-            elif -3*np.pi/4 < num < -np.pi/4:
-                return 2
-            elif 3*np.pi/4 < num < np.pi or -np.pi < num < -3*np.pi/4:
-                return 1
-            else:
-                return 5
+    # Create transform from message
+    reference_tform_object = SE3Pose(
+        x=msg.transform.translation.x,
+        y=msg.transform.translation.y,
+        z=msg.transform.translation.z,
+        rot=Quat(
+            w=msg.transform.rotation.w,
+            x=msg.transform.rotation.x,
+            y=msg.transform.rotation.y,
+            z=msg.transform.rotation.z,
+        ),
+    )
+    # Look up euler angles
+    axis = quat2euler(
+        [
+            msg.transform.rotation.w,
+            msg.transform.rotation.x,
+            msg.transform.rotation.y,
+            msg.transform.rotation.z,
+        ]
+    )
 
-        rotate = 0
+    self.get_logger().info(f"AXIS: {axis}")
 
-        # Check if inverted orientation
-        if self.object_name == "tupperware":
-            axis0 = quadrant(axis[0])
-            axis1 = quadrant(axis[1])
-            axis2 = quadrant(axis[2])
-
-            if axis0 == 4 and axis1 == 3 and axis2 == 3:
-                rotate = 2
-            elif axis0 == 2 and axis1 == 3 and axis2 == 1:
-                rotate = 2
-            elif axis0 == 2 and axis1 == 4 and axis2 == 1:
-                rotate = 2
-            
-            elif axis0 == 4 and axis1 == 3 and axis2 == 4:
-                rotate = 1
-            elif axis0 == 2 and axis1 == 3 and axis2 == 4:
-                rotate = 1
-            elif axis0 == 1 and axis1 == 3 and axis2 == 4:
-                rotate = 1
-            
-            elif axis0 == 4 and axis1 == 3 and axis2 == 1:
-                rotate = 0           
-            elif axis0 == 2 and axis1 == 3 and axis2 == 3:
-                rotate = 0
-            elif axis0 == 2 and axis1 == 2 and axis2 == 3:
-                rotate = 0
-            
-            elif axis0 == 4 and axis1 == 3 and axis2 == 2:
-                rotate = 3
-            elif axis0 == 2 and axis1 == 3 and axis2 == 2:
-                rotate = 3
-            elif axis0 == 3 and axis1 == 2 and axis2 == 2:
-                rotate = 3
-            elif axis0 == 1 and axis1 == 3 and axis2 == 2:
-                rotate = 3
-            elif axis0 == 3 and axis1 == 3 and axis2 == 2:
-                rotate = 3
-            
-            else:
-                self.get_logger().warn(str(axis0)+str(axis1)+str(axis2))
-                
-
-        self.get_logger().info(f"ROTATE? {rotate}")
-
-        # Check if tupperware needs to be rotated
-        if self.object_name == "tupperware" and rotate > 0:
-            if rotate == 1:
-                inverted_rotation = SE3Pose(0.0, 0.0, 0.0, Quat(0.707, 0.0, 0.707, 0.0))
-            elif rotate == 2:
-                inverted_rotation = SE3Pose(0.0, 0.0, 0.0, Quat(0.0, 0.0, 1.0, 0.0))
-            elif rotate == 3:
-                inverted_rotation = SE3Pose(0.0, 0.0, 0.0, Quat(0.707, 0.0, -.707, 0.0))
-            vision_tform_object = self.vision_tform_reference * reference_tform_object * inverted_rotation
+    def quadrant(num):
+        if np.pi / 4 < num < 3 * np.pi / 4:
+            return 4
+        elif 0 < num < np.pi / 4 or -np.pi / 4 < num < 0:
+            return 3
+        elif -3 * np.pi / 4 < num < -np.pi / 4:
+            return 2
+        elif 3 * np.pi / 4 < num < np.pi or -np.pi < num < -3 * np.pi / 4:
+            return 1
         else:
-            vision_tform_object = self.vision_tform_reference * reference_tform_object
+            return 5
 
-        # Determine pre-grasp object type
-        if self.object_name in self.object_list:
-            self.get_the_grasps()
-            object_tform_hand = SE3Pose(self.grasp_poses[self.object_name]['pre'][0], self.grasp_poses[self.object_name]['pre'][1], self.grasp_poses[self.object_name]['pre'][2], self.grasp_poses[self.object_name]['quat'])
+    rotate = 0
+
+    # Check if inverted orientation
+    if self.object_name == "tupperware":
+        axis0 = quadrant(axis[0])
+        axis1 = quadrant(axis[1])
+        axis2 = quadrant(axis[2])
+
+        if axis0 == 4 and axis1 == 3 and axis2 == 3:
+            rotate = 2
+        elif axis0 == 2 and axis1 == 3 and axis2 == 1:
+            rotate = 2
+        elif axis0 == 2 and axis1 == 4 and axis2 == 1:
+            rotate = 2
+
+        elif axis0 == 4 and axis1 == 3 and axis2 == 4:
+            rotate = 1
+        elif axis0 == 2 and axis1 == 3 and axis2 == 4:
+            rotate = 1
+        elif axis0 == 1 and axis1 == 3 and axis2 == 4:
+            rotate = 1
+
+        elif axis0 == 4 and axis1 == 3 and axis2 == 1:
+            rotate = 0
+        elif axis0 == 2 and axis1 == 3 and axis2 == 3:
+            rotate = 0
+        elif axis0 == 2 and axis1 == 2 and axis2 == 3:
+            rotate = 0
+
+        elif axis0 == 4 and axis1 == 3 and axis2 == 2:
+            rotate = 3
+        elif axis0 == 2 and axis1 == 3 and axis2 == 2:
+            rotate = 3
+        elif axis0 == 3 and axis1 == 2 and axis2 == 2:
+            rotate = 3
+        elif axis0 == 1 and axis1 == 3 and axis2 == 2:
+            rotate = 3
+        elif axis0 == 3 and axis1 == 3 and axis2 == 2:
+            rotate = 3
+
         else:
-            # Object unknown
-            object_tform_hand = SE3Pose(0.0, 0.0, 0.0, Quat(1.0, 0.0, 0.0, 0.0))
+            self.get_logger().warn(str(axis0) + str(axis1) + str(axis2))
 
-        vision_tform_hand = vision_tform_object * object_tform_hand
+    self.get_logger().info(f"ROTATE? {rotate}")
 
+    # Check if tupperware needs to be rotated
+    if self.object_name == "tupperware" and rotate > 0:
+        if rotate == 1:
+            inverted_rotation = SE3Pose(0.0, 0.0, 0.0, Quat(0.707, 0.0, 0.707, 0.0))
+        elif rotate == 2:
+            inverted_rotation = SE3Pose(0.0, 0.0, 0.0, Quat(0.0, 0.0, 1.0, 0.0))
+        elif rotate == 3:
+            inverted_rotation = SE3Pose(0.0, 0.0, 0.0, Quat(0.707, 0.0, -0.707, 0.0))
+        vision_tform_object = (
+            self.vision_tform_reference * reference_tform_object * inverted_rotation
+        )
+    else:
+        vision_tform_object = self.vision_tform_reference * reference_tform_object
 
-        arm_command = RobotCommandBuilder.arm_pose_command(x = vision_tform_hand.x,
-                                                           y = vision_tform_hand.y,
-                                                           z = vision_tform_hand.z,
-                                                           qw = vision_tform_hand.rot.w,
-                                                           qx = vision_tform_hand.rot.x,
-                                                           qy = vision_tform_hand.rot.y,
-                                                           qz = vision_tform_hand.rot.z,
-                                                           frame_name = VISION_FRAME_NAME,
-                                                           seconds=5)
-        arm_command.synchronized_command.arm_command.arm_cartesian_command.max_linear_velocity.value = self.max_arm_lin_vel
-        arm_command.synchronized_command.arm_command.arm_cartesian_command.max_angular_velocity.value = self.max_grasp_ang_vel
-        arm_command.synchronized_command.arm_command.arm_cartesian_command.maximum_acceleration.value = self.max_grasp_accel 
-        
-        self.get_logger().info("COMMANDING ROBOT")
-        m1 = self.SE3Pose_to_TransformStamped(vision_tform_object, "vision", "spot_object")
-        self.get_logger().error(str(m1))
-        self.get_logger().error("DESIRED HAND 1242")
-        self.get_logger().error("DESIRED HAND 1242")
-        self.get_logger().error("DESIRED HAND 1242")
-        self.get_logger().error("DESIRED HAND 1242")
-        self.get_logger().error("DESIRED HAND 1242")
-        m2 = self.SE3Pose_to_TransformStamped(vision_tform_hand, "vision", "desired_hand")
-        self.get_logger().error(str(m2))
+    # Determine pre-grasp object type
+    if self.object_name in self.object_list:
+        self.get_the_grasps()
+        object_tform_hand = SE3Pose(
+            self.grasp_poses[self.object_name]["pre"][0],
+            self.grasp_poses[self.object_name]["pre"][1],
+            self.grasp_poses[self.object_name]["pre"][2],
+            self.grasp_poses[self.object_name]["quat"],
+        )
+    else:
+        # Object unknown
+        object_tform_hand = SE3Pose(0.0, 0.0, 0.0, Quat(1.0, 0.0, 0.0, 0.0))
 
-        tfm = TFMessage()
-        tfm.transforms = [m1, m2]
+    vision_tform_hand = vision_tform_object * object_tform_hand
 
-        self.tf_pub.publish(tfm)
+    arm_command = RobotCommandBuilder.arm_pose_command(
+        x=vision_tform_hand.x,
+        y=vision_tform_hand.y,
+        z=vision_tform_hand.z,
+        qw=vision_tform_hand.rot.w,
+        qx=vision_tform_hand.rot.x,
+        qy=vision_tform_hand.rot.y,
+        qz=vision_tform_hand.rot.z,
+        frame_name=VISION_FRAME_NAME,
+        seconds=5,
+    )
+    arm_command.synchronized_command.arm_command.arm_cartesian_command.max_linear_velocity.value = self.max_arm_lin_vel
+    arm_command.synchronized_command.arm_command.arm_cartesian_command.max_angular_velocity.value = self.max_grasp_ang_vel
+    arm_command.synchronized_command.arm_command.arm_cartesian_command.maximum_acceleration.value = self.max_grasp_accel
 
-        # Send arm command to robot
+    self.get_logger().info("COMMANDING ROBOT")
+    m1 = self.SE3Pose_to_TransformStamped(vision_tform_object, "vision", "spot_object")
+    self.get_logger().error(str(m1))
+    self.get_logger().error("DESIRED HAND 1242")
+    self.get_logger().error("DESIRED HAND 1242")
+    self.get_logger().error("DESIRED HAND 1242")
+    self.get_logger().error("DESIRED HAND 1242")
+    self.get_logger().error("DESIRED HAND 1242")
+    m2 = self.SE3Pose_to_TransformStamped(vision_tform_hand, "vision", "desired_hand")
+    self.get_logger().error(str(m2))
+
+    tfm = TFMessage()
+    tfm.transforms = [m1, m2]
+
+    self.tf_pub.publish(tfm)
+
+    # Send arm command to robot
+    if not self.stop_robot_flag:
+        cmd_id = self.robot_command_client.robot_command(arm_command)
+        self.get_logger().info("STARTING MOVEMENT")
+        output = self.block_until_arm_arrives_interruptable(
+            self.robot_command_client, cmd_id, timeout_sec=10
+        )
+    else:
+        self.get_logger().error("ROBOT STOPPED - PREGRASP STOPPED")
+        result = GraspObject.Result()
+        return result
+
+    # Open gripper
+    if not self.stop_robot_flag:
+        gripper_command = RobotCommandBuilder.claw_gripper_open_command()
+        cmd_id = self.robot_command_client.robot_command(gripper_command)
+        output = self.block_until_gripper_arrives(
+            self.robot_command_client, cmd_id, timeout_sec=2
+        )
+
+        self.get_logger().info("MOVED TO INITAL GRASP POSITION")
+
+        time.sleep(1)
+    else:
+        self.get_logger().error("ROBOT STOPPED - PREGRASP OPEN STOPPED")
+        result = GraspObject.Result()
+        return result
+
+    # Move to grasp position
+
+    # Determine grasp object type
+    if self.object_name in self.object_list:
+        self.get_the_grasps()
+        object_tform_hand = SE3Pose(
+            self.grasp_poses[self.object_name]["pos"][0],
+            self.grasp_poses[self.object_name]["pos"][1],
+            self.grasp_poses[self.object_name]["pos"][2],
+            self.grasp_poses[self.object_name]["quat"],
+        )
+    else:
+        # Unknown object
+        self.get_logger().error("No object detected for grasping!")
+
+        result = GraspObject.Result()
+        return result
+
+    vision_tform_hand = vision_tform_object * object_tform_hand
+
+    arm_command = RobotCommandBuilder.arm_pose_command(
+        x=vision_tform_hand.x,
+        y=vision_tform_hand.y,
+        z=vision_tform_hand.z,
+        qw=vision_tform_hand.rot.w,
+        qx=vision_tform_hand.rot.x,
+        qy=vision_tform_hand.rot.y,
+        qz=vision_tform_hand.rot.z,
+        frame_name=VISION_FRAME_NAME,
+        seconds=5,
+    )
+    arm_command.synchronized_command.arm_command.arm_cartesian_command.max_linear_velocity.value = self.max_arm_lin_vel
+    arm_command.synchronized_command.arm_command.arm_cartesian_command.max_angular_velocity.value = self.max_grasp_ang_vel
+    arm_command.synchronized_command.arm_command.arm_cartesian_command.maximum_acceleration.value = self.max_grasp_accel
+
+    # Send arm command to robot
+    if not self.stop_robot_flag:
+        cmd_id = self.robot_command_client.robot_command(arm_command)
+        output = self.block_until_arm_arrives_interruptable(
+            self.robot_command_client, cmd_id, timeout_sec=10
+        )
+
+        self.get_logger().info("MOVED TO GRASP LOCATION")
+    else:
+        self.get_logger().error("ROBOT STOPPED - GRASP MOVEMENT STOPPED")
+        result = GraspObject.Result()
+        return result
+
+    if self.object_name in self.object_list:
+        self.get_the_grasps()
+        gripper_command = RobotCommandBuilder.claw_gripper_open_fraction_command(
+            self.grasp_poses[self.object_name]["gripper_close"]
+        )
+        gripper_command.synchronized_command.gripper_command.claw_gripper_command.maximum_open_close_velocity.value = self.max_gripper_vel
         if not self.stop_robot_flag:
-            cmd_id = self.robot_command_client.robot_command(arm_command)
-            self.get_logger().info("STARTING MOVEMENT")
-            output = self.block_until_arm_arrives_interruptable(self.robot_command_client, cmd_id, timeout_sec=10)
-        else:
-            self.get_logger().error("ROBOT STOPPED - PREGRASP STOPPED")
-            result = GraspObject.Result()
-            return result
-
-        # Open gripper
-        if not self.stop_robot_flag:
-            gripper_command = RobotCommandBuilder.claw_gripper_open_command()
             cmd_id = self.robot_command_client.robot_command(gripper_command)
-            output = self.block_until_gripper_arrives(self.robot_command_client, cmd_id, timeout_sec=2)
-
-            self.get_logger().info("MOVED TO INITAL GRASP POSITION")
-
-            time.sleep(1)
+            output = self.block_until_gripper_arrives(
+                self.robot_command_client, cmd_id, timeout_sec=2
+            )
         else:
-            self.get_logger().error("ROBOT STOPPED - PREGRASP OPEN STOPPED")
-            result = GraspObject.Result()
-            return result
-
-        # Move to grasp position
-
-
-        # Determine grasp object type
-        if self.object_name in self.object_list:
-            self.get_the_grasps()
-            object_tform_hand = SE3Pose(self.grasp_poses[self.object_name]['pos'][0], self.grasp_poses[self.object_name]['pos'][1], self.grasp_poses[self.object_name]['pos'][2], self.grasp_poses[self.object_name]['quat'])
-        else:
-            # Unknown object
-            self.get_logger().error("No object detected for grasping!")
-
-            result = GraspObject.Result()
-            return result
-
-        vision_tform_hand = vision_tform_object * object_tform_hand
-        
-        arm_command = RobotCommandBuilder.arm_pose_command(x = vision_tform_hand.x,
-                                                           y = vision_tform_hand.y,
-                                                           z = vision_tform_hand.z,
-                                                           qw = vision_tform_hand.rot.w,
-                                                           qx = vision_tform_hand.rot.x,
-                                                           qy = vision_tform_hand.rot.y,
-                                                           qz = vision_tform_hand.rot.z,
-                                                           frame_name = VISION_FRAME_NAME,
-                                                           seconds=5)
-        arm_command.synchronized_command.arm_command.arm_cartesian_command.max_linear_velocity.value = self.max_arm_lin_vel
-        arm_command.synchronized_command.arm_command.arm_cartesian_command.max_angular_velocity.value = self.max_grasp_ang_vel
-        arm_command.synchronized_command.arm_command.arm_cartesian_command.maximum_acceleration.value = self.max_grasp_accel 
-        
-        # Send arm command to robot
-        if not self.stop_robot_flag:
-            cmd_id = self.robot_command_client.robot_command(arm_command)
-            output = self.block_until_arm_arrives_interruptable(self.robot_command_client, cmd_id, timeout_sec=10)
-
-            self.get_logger().info("MOVED TO GRASP LOCATION")
-        else:
-            self.get_logger().error("ROBOT STOPPED - GRASP MOVEMENT STOPPED")
-            result = GraspObject.Result()
-            return result
-
-        if self.object_name in self.object_list:
-            self.get_the_grasps()
-            gripper_command = RobotCommandBuilder.claw_gripper_open_fraction_command(self.grasp_poses[self.object_name]['gripper_close'])
-            gripper_command.synchronized_command.gripper_command.claw_gripper_command.maximum_open_close_velocity.value = self.max_gripper_vel
-            if not self.stop_robot_flag:
-                cmd_id = self.robot_command_client.robot_command(gripper_command)
-                output = self.block_until_gripper_arrives(self.robot_command_client, cmd_id, timeout_sec=2)
-            else:
-                self.get_logger().error("ROBOT STOPPED - GRIPPING OBJECT STOPPED")
-                output = False
-                result = GraspObject.Result()
-                return result
-        else:
-            self.get_logger().error("No object detected for grasping!")
+            self.get_logger().error("ROBOT STOPPED - GRIPPING OBJECT STOPPED")
             output = False
             result = GraspObject.Result()
             return result
+    else:
+        self.get_logger().error("No object detected for grasping!")
+        output = False
+        result = GraspObject.Result()
+        return result
 
-        self.get_logger().info("GRASPED OBJECT")
+    self.get_logger().info("GRASPED OBJECT")
 
-        time.sleep(2)
+    time.sleep(2)
 
-        # check transform from tag to hand (if available)
-        robot_state_transforms = self.robot_state_client.get_robot_state().kinematic_state.transforms_snapshot
-        vision_tform_hand = get_a_tform_b(robot_state_transforms, VISION_FRAME_NAME, HAND_FRAME_NAME)
+    # check transform from tag to hand (if available)
+    robot_state_transforms = (
+        self.robot_state_client.get_robot_state().kinematic_state.transforms_snapshot
+    )
+    vision_tform_hand = get_a_tform_b(
+        robot_state_transforms, VISION_FRAME_NAME, HAND_FRAME_NAME
+    )
 
-        ref_tform_vision = self.vision_tform_reference.inverse()
-        ref_tform_hand = ref_tform_vision * vision_tform_hand
+    ref_tform_vision = self.vision_tform_reference.inverse()
+    ref_tform_hand = ref_tform_vision * vision_tform_hand
 
-        if self.object_name == 'bleach':
-            self.get_the_grasps()
-            self.grasp_poses['bleach']['post'] = self.grasp_poses['bleach']['pose_preset']
-        elif self.object_name is not None:
-            if self.tf_buffer.can_transform(self.base_frame, self.object_name, rclpy.time.Time()):
-                msg = self.tf_buffer.lookup_transform(self.base_frame, self.object_name, rclpy.time.Time())
-                ref_tform_object = SE3Pose(x=msg.transform.translation.x,
-                                                y=msg.transform.translation.y,
-                                                z=msg.transform.translation.z,
-                                                rot=Quat(msg.transform.rotation.w,
-                                                        msg.transform.rotation.x,
-                                                        msg.transform.rotation.y,
-                                                        msg.transform.rotation.z))
-                
-                if self.object_name == "tupperware" and rotate > 0:
-                    ref_tform_object = ref_tform_object * inverted_rotation
+    if self.object_name == "bleach":
+        self.get_the_grasps()
+        self.grasp_poses["bleach"]["post"] = self.grasp_poses["bleach"]["pose_preset"]
+    elif self.object_name is not None:
+        if self.tf_buffer.can_transform(
+            self.base_frame, self.object_name, rclpy.time.Time()
+        ):
+            msg = self.tf_buffer.lookup_transform(
+                self.base_frame, self.object_name, rclpy.time.Time()
+            )
+            ref_tform_object = SE3Pose(
+                x=msg.transform.translation.x,
+                y=msg.transform.translation.y,
+                z=msg.transform.translation.z,
+                rot=Quat(
+                    msg.transform.rotation.w,
+                    msg.transform.rotation.x,
+                    msg.transform.rotation.y,
+                    msg.transform.rotation.z,
+                ),
+            )
 
-                object_tform_hand = ref_tform_object.inverse() * ref_tform_hand
-                self.get_logger().warn(str(object_tform_hand))
-                self.get_logger().warn(str(self.object_name))
-                if self.object_name in self.object_list:
-                    self.get_the_grasps()
-                    self.grasp_poses[self.object_name]['post'] = [object_tform_hand.x, object_tform_hand.y, object_tform_hand.z]
-                    self.grasp_poses[self.object_name]['post_quat'] = Quat(object_tform_hand.rot.w, object_tform_hand.rot.x, object_tform_hand.rot.y, object_tform_hand.rot.z)
-                    self.get_logger().warn("OBJECT GRASP TRANSFORM UPDATED: "+str(self.grasp_poses[self.object_name]['post']))
-     
+            if self.object_name == "tupperware" and rotate > 0:
+                ref_tform_object = ref_tform_object * inverted_rotation
 
-        # If knife, determine location to pull knife out of block after grasp
-        if self.object_name in ['knife']:
-            self.get_the_grasps()
-            object_tform_new_hand = SE3Pose(self.grasp_poses[self.object_name]['out'][0], self.grasp_poses[self.object_name]['out'][1], self.grasp_poses[self.object_name]['out'][2], self.grasp_poses[self.object_name]['post_quat'])
-        elif self.object_name in ['tupperware', 'sponge', 'bleach', 'broom', 'test']:
+            object_tform_hand = ref_tform_object.inverse() * ref_tform_hand
+            self.get_logger().warn(str(object_tform_hand))
+            self.get_logger().warn(str(self.object_name))
+            if self.object_name in self.object_list:
+                self.get_the_grasps()
+                self.grasp_poses[self.object_name]["post"] = [
+                    object_tform_hand.x,
+                    object_tform_hand.y,
+                    object_tform_hand.z,
+                ]
+                self.grasp_poses[self.object_name]["post_quat"] = Quat(
+                    object_tform_hand.rot.w,
+                    object_tform_hand.rot.x,
+                    object_tform_hand.rot.y,
+                    object_tform_hand.rot.z,
+                )
+                self.get_logger().warn(
+                    "OBJECT GRASP TRANSFORM UPDATED: "
+                    + str(self.grasp_poses[self.object_name]["post"])
+                )
 
-            goal_handle.succeed()
-
-            result = GraspObject.Result()
-            result.success = output
-            return result
-        else:
-            # Unknown object
-            self.get_logger().error("No object detected for grasping!")
-
-            result = GraspObject.Result()
-            return result
-        
-
-        # only continue if knife
-        vision_tform_hand = vision_tform_object * object_tform_new_hand
-        
-        arm_command = RobotCommandBuilder.arm_pose_command(x = vision_tform_hand.x,
-                                                           y = vision_tform_hand.y,
-                                                           z = vision_tform_hand.z,
-                                                           qw = vision_tform_hand.rot.w,
-                                                           qx = vision_tform_hand.rot.x,
-                                                           qy = vision_tform_hand.rot.y,
-                                                           qz = vision_tform_hand.rot.z,
-                                                           frame_name = VISION_FRAME_NAME,
-                                                           seconds=5)
-        arm_command.synchronized_command.arm_command.arm_cartesian_command.max_linear_velocity.value = self.max_arm_lin_vel
-        arm_command.synchronized_command.arm_command.arm_cartesian_command.max_angular_velocity.value = self.max_grasp_ang_vel
-        arm_command.synchronized_command.arm_command.arm_cartesian_command.maximum_acceleration.value = self.max_grasp_accel 
-        
-        # Send arm command to robot
-        if not self.stop_robot_flag:
-            cmd_id = self.robot_command_client.robot_command(arm_command)
-            output = self.block_until_arm_arrives_interruptable(self.robot_command_client, cmd_id, timeout_sec=10)
-        else:
-            self.get_logger().error("ROBOT STOPPED - POST GRASP MOVEMENT STOPPED")
-            result = GraspObject.Result()
-            return result
-        
-        time.sleep(2)
-
-        robot_state_transforms = self.robot_state_client.get_robot_state().kinematic_state.transforms_snapshot
-        vision_tform_hand = get_a_tform_b(robot_state_transforms, VISION_FRAME_NAME, HAND_FRAME_NAME)
-
-        ref_tform_vision = self.vision_tform_reference.inverse()
-        ref_tform_hand = ref_tform_vision * vision_tform_hand
-
-        if self.object_name is not None:
-            if self.tf_buffer.can_transform(self.base_frame, self.object_name, rclpy.time.Time()):
-                msg = self.tf_buffer.lookup_transform(self.base_frame, self.object_name, rclpy.time.Time())
-                ref_tform_object = SE3Pose(x=msg.transform.translation.x,
-                                                y=msg.transform.translation.y,
-                                                z=msg.transform.translation.z,
-                                                rot=Quat(msg.transform.rotation.w,
-                                                        msg.transform.rotation.x,
-                                                        msg.transform.rotation.y,
-                                                        msg.transform.rotation.z))
-
-                object_tform_hand = ref_tform_object.inverse() * ref_tform_hand
-                self.get_logger().warn(str(object_tform_hand))
-                self.get_logger().warn(str(self.object_name))
-                if self.object_name in self.object_list:      
-                    self.get_the_grasps()   
-                    # for some reason, z doesn't update well in this position (probably due to camera angles, so keep old z)
-                    self.grasp_poses[self.object_name]['post'] = [object_tform_hand.x, object_tform_hand.y, self.grasp_poses[self.object_name]['post'][2]]
-                    self.grasp_poses[self.object_name]['post_quat'] = Quat(object_tform_hand.rot.w, object_tform_hand.rot.x, object_tform_hand.rot.y, object_tform_hand.rot.z)
-                    self.get_logger().warn("OBJECT GRASP TRANSFORM UPDATED: "+str(self.grasp_poses[self.object_name]['post']))
-     
+    # If knife, determine location to pull knife out of block after grasp
+    if self.object_name in ["knife"]:
+        self.get_the_grasps()
+        object_tform_new_hand = SE3Pose(
+            self.grasp_poses[self.object_name]["out"][0],
+            self.grasp_poses[self.object_name]["out"][1],
+            self.grasp_poses[self.object_name]["out"][2],
+            self.grasp_poses[self.object_name]["post_quat"],
+        )
+    elif self.object_name in ["tupperware", "sponge", "bleach", "broom", "test"]:
         goal_handle.succeed()
 
         result = GraspObject.Result()
         result.success = output
-
         return result
+    else:
+        # Unknown object
+        self.get_logger().error("No object detected for grasping!")
+
+        result = GraspObject.Result()
+        return result
+
+    # only continue if knife
+    vision_tform_hand = vision_tform_object * object_tform_new_hand
+
+    arm_command = RobotCommandBuilder.arm_pose_command(
+        x=vision_tform_hand.x,
+        y=vision_tform_hand.y,
+        z=vision_tform_hand.z,
+        qw=vision_tform_hand.rot.w,
+        qx=vision_tform_hand.rot.x,
+        qy=vision_tform_hand.rot.y,
+        qz=vision_tform_hand.rot.z,
+        frame_name=VISION_FRAME_NAME,
+        seconds=5,
+    )
+    arm_command.synchronized_command.arm_command.arm_cartesian_command.max_linear_velocity.value = self.max_arm_lin_vel
+    arm_command.synchronized_command.arm_command.arm_cartesian_command.max_angular_velocity.value = self.max_grasp_ang_vel
+    arm_command.synchronized_command.arm_command.arm_cartesian_command.maximum_acceleration.value = self.max_grasp_accel
+
+    # Send arm command to robot
+    if not self.stop_robot_flag:
+        cmd_id = self.robot_command_client.robot_command(arm_command)
+        output = self.block_until_arm_arrives_interruptable(
+            self.robot_command_client, cmd_id, timeout_sec=10
+        )
+    else:
+        self.get_logger().error("ROBOT STOPPED - POST GRASP MOVEMENT STOPPED")
+        result = GraspObject.Result()
+        return result
+
+    time.sleep(2)
+
+    robot_state_transforms = (
+        self.robot_state_client.get_robot_state().kinematic_state.transforms_snapshot
+    )
+    vision_tform_hand = get_a_tform_b(
+        robot_state_transforms, VISION_FRAME_NAME, HAND_FRAME_NAME
+    )
+
+    ref_tform_vision = self.vision_tform_reference.inverse()
+    ref_tform_hand = ref_tform_vision * vision_tform_hand
+
+    if self.object_name is not None:
+        if self.tf_buffer.can_transform(
+            self.base_frame, self.object_name, rclpy.time.Time()
+        ):
+            msg = self.tf_buffer.lookup_transform(
+                self.base_frame, self.object_name, rclpy.time.Time()
+            )
+            ref_tform_object = SE3Pose(
+                x=msg.transform.translation.x,
+                y=msg.transform.translation.y,
+                z=msg.transform.translation.z,
+                rot=Quat(
+                    msg.transform.rotation.w,
+                    msg.transform.rotation.x,
+                    msg.transform.rotation.y,
+                    msg.transform.rotation.z,
+                ),
+            )
+
+            object_tform_hand = ref_tform_object.inverse() * ref_tform_hand
+            self.get_logger().warn(str(object_tform_hand))
+            self.get_logger().warn(str(self.object_name))
+            if self.object_name in self.object_list:
+                self.get_the_grasps()
+                # for some reason, z doesn't update well in this position (probably due to camera angles, so keep old z)
+                self.grasp_poses[self.object_name]["post"] = [
+                    object_tform_hand.x,
+                    object_tform_hand.y,
+                    self.grasp_poses[self.object_name]["post"][2],
+                ]
+                self.grasp_poses[self.object_name]["post_quat"] = Quat(
+                    object_tform_hand.rot.w,
+                    object_tform_hand.rot.x,
+                    object_tform_hand.rot.y,
+                    object_tform_hand.rot.z,
+                )
+                self.get_logger().warn(
+                    "OBJECT GRASP TRANSFORM UPDATED: "
+                    + str(self.grasp_poses[self.object_name]["post"])
+                )
+
+    goal_handle.succeed()
+
+    result = GraspObject.Result()
+    result.success = output
+
+    return result
+
 
 # Main Function
 def main():
