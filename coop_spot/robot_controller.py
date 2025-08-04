@@ -77,6 +77,7 @@ from bosdyn.client.frame_helpers import (
     ODOM_FRAME_NAME,
     HAND_FRAME_NAME,
     add_edge_to_tree,
+    math_helpers
 )
 from bosdyn.client.math_helpers import SE3Pose, Quat
 import bosdyn.client.util
@@ -170,6 +171,14 @@ class RobotController(Node):
             self, Gripper, "desired_gripper_state", self.desired_gripper_state_callback
         )
 
+        self.stow_arm_service = ActionServer(
+            self, SendBool, "stow_arm", self.stow_arm
+        )
+
+        self.return_obj_service = ActionServer(
+            self, SendBool, "return_obj", self.return_obj
+        )
+
         # Stop robot command
         self.create_subscription(Bool, "/stop_robot_flag", self.stop_robot_callback, 1)
         self.stop_robot_flag = False
@@ -222,6 +231,8 @@ class RobotController(Node):
             # Dictionary values: use_extrinsics_guess bool, (rotation vector, translation vector) tuple.
             camera_to_extrinsics_guess[src] = (False, (None, None))
         return camera_to_extrinsics_guess
+
+        
 
     def calibration_timer_callback(self):
         # Make sure previous transform exists
@@ -474,6 +485,27 @@ class RobotController(Node):
             result = SendJointPose.Result()
             result.success = False
             return result
+
+    def stow_arm(self, msg):
+        if msg.request.state:
+            # Build the stow command
+            stow = RobotCommandBuilder.arm_stow_command()
+
+            # Issues the command
+            stow_command_id = self.robot_command_client.robot_command(stow)
+
+            # Block movement until stowing is complete
+            block_until_arm_arrives(self.robot_command_client, stow_command_id, 3.0)
+
+            self.get_logger().info("STOW ARM COMPLETE")
+            msg.succeed()
+            result = SendBool.Result()
+            result.success = True
+            return result
+        
+        result = SendBool.Result()
+        result.sucess = False
+        return result
 
     def desired_gripper_state_callback(self, goal_handle):
         # 0 -> open, 1 -> closed
@@ -813,9 +845,6 @@ class RobotController(Node):
 
             self.april_tags[bbox_id] = detections[i]["center"], image
 
-            if bbox_id == 57:
-                self.center = detections[i]["center"]
-
             # bboxes.append(bbox)
 
         self.img[source_name] = image_grey
@@ -920,6 +949,53 @@ class RobotController(Node):
         )
         return fiducial_rt_world
 
+    def return_obj(self, msg):
+        # Returning hand to position after the grasp
+        self.get_logger().info("Inside return_obj in robot_controller")
+        arm_command = RobotCommandBuilder.arm_pose_command(
+        x=self.after_grasp_loc.x,
+        y=self.after_grasp_loc.y,
+        z=self.after_grasp_loc.z,
+        qw=self.after_grasp_loc.rot.w,
+        qx=self.after_grasp_loc.rot.x,
+        qy=self.after_grasp_loc.rot.y,
+        qz=self.after_grasp_loc.rot.z,
+        frame_name=BODY_FRAME_NAME,
+        seconds=5,
+        )
+        arm_command.synchronized_command.arm_command.arm_cartesian_command.max_linear_velocity.value = self.max_arm_lin_vel
+        arm_command.synchronized_command.arm_command.arm_cartesian_command.max_angular_velocity.value = self.max_grasp_ang_vel
+        arm_command.synchronized_command.arm_command.arm_cartesian_command.maximum_acceleration.value = self.max_grasp_accel
+
+        # Send arm command to robot
+        cmd_id = self.robot_command_client.robot_command(arm_command)
+
+        output = self.block_until_arm_arrives_interruptable(
+            self.robot_command_client, cmd_id, timeout_sec=5
+        )
+        
+        result = SendBool.Result()
+        msg.succeed()
+        result.success = True
+        return result
+
+
+
+    def store_arm_coords(self):
+        # Request the robot state
+        # check transform from tag to hand (if available)
+        self.get_logger().info("Storing arm coordinates...")
+        robot_state_transforms = (
+            self.robot_state_client.get_robot_state().kinematic_state.transforms_snapshot
+        )
+        body_tform_hand = get_a_tform_b(
+            robot_state_transforms, BODY_FRAME_NAME, HAND_FRAME_NAME
+        )
+
+        self.after_grasp_loc = body_tform_hand
+
+        self.get_logger().info(str(self.after_grasp_loc))
+
     def grasp_tag(self, msg):
         """Use the position of the april tag in vision world frame and command the robot to grasp the attach object"""
         self.get_logger().info("Entered grasp tag")
@@ -976,9 +1052,12 @@ class RobotController(Node):
         self.get_logger().info("Finished grasp.")
         time.sleep(4.0)
 
+        self.store_arm_coords()
+
         result = SendInt.Result()
         result.success = True
         return result
+
 
     def go_to_tag(self, fiducial_rt_world):
         """Use the position of the april tag in vision world frame and command the robot."""

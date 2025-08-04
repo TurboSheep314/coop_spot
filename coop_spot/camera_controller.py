@@ -130,6 +130,14 @@ class CameraProcessNode(Node):
         self.gripper_service_client = ActionClient(
             self, Gripper, "desired_gripper_state"
         )
+
+        self.stow_arm_client = ActionClient(
+            self, SendBool, "stow_arm"
+        )
+
+        self.return_obj_client = ActionClient(
+            self, SendBool, "return_obj"
+        )
         # publish nearest tag
         # self.closest_apriltag_pub = self.create_publisher(String, 'closest_tag', 10)
 
@@ -288,6 +296,51 @@ class CameraProcessNode(Node):
         self.desired_arm_body_pose_nc_service_client.wait_for_server()
         output = self.desired_arm_body_pose_nc_service_client.send_goal_async(msg)
 
+
+
+
+    def spot_hand_off_pos(self):
+        # this moves Spot's arm into the hand off position
+
+        # ensures Spot's gripper is closed
+        #self.get_logger().info("CLOSING GRIPPER", throttle_duration_sec=3)
+        #message = Gripper.Goal()
+        #message.gripper_state = True
+        #self.gripper_service_client.wait_for_server()
+        #self.gripper_service_client.send_goal_async(message)
+        #self.get_logger().info("Gripper Closed", throttle_duration_sec=3)
+        # Create arm pose message
+        self.get_logger().info("MOVING ARM", throttle_duration_sec=3)
+        message = TransformStamped()
+        message.header = Header()
+        message.header.stamp = Time()
+        t = time.time()
+        message.header.stamp.sec = int(t)
+        message.header.stamp.nanosec = int((t - int(t)) * 1e9)
+        message.header.frame_id = "body"
+        message.transform = Transform()
+        message.transform.translation = Vector3()
+        message.transform.translation.x = 0.6
+        message.transform.translation.y = -0.5
+        message.transform.translation.z = 0.7
+        message.transform.rotation = Quaternion()
+        # message.transform.rotation.x = -0.028
+        # message.transform.rotation.y = 0.639
+        # message.transform.rotation.z = 0.033
+        # message.transform.rotation.w = 0.768
+        message.transform.rotation.x = 0.153
+        message.transform.rotation.y = 0.153
+        message.transform.rotation.z = -0.691
+        message.transform.rotation.w = 0.691
+        message.child_frame_id = "hand"
+
+        # Send the message to robot_controller
+        # self.desired_arm_body_pose_pub.publish(message)
+        msg = SendPose.Goal()
+        msg.pose = message
+        self.desired_arm_body_pose_nc_service_client.wait_for_server()
+        output = self.desired_arm_body_pose_nc_service_client.send_goal_async(msg)
+
     def initGUI(self):
         """Initializes basic GUI elements"""
         self.gui.setWindowTitle("ZED camera")
@@ -311,7 +364,7 @@ class CameraProcessNode(Node):
         # --- Calibrate Spot Button --- #
 
         self.cali_button = QtWidgets.QPushButton(self.gui)
-        self.cali_button.setGeometry(QtCore.QRect(700, 50, 500, 50))
+        self.cali_button.setGeometry(QtCore.QRect(700, 50, 200, 50))
         self.cali_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.cali_button.setObjectName("cali_button")
@@ -319,15 +372,96 @@ class CameraProcessNode(Node):
         self.cali_button.clicked.connect(self.spot_arm_calibrate_pos)
         self.cali_button.show()
 
-        # --- Grasp Object Spot Button ---
-        self.grasp_object_button = QtWidgets.QPushButton(self.gui)
-        self.grasp_object_button.setGeometry(QtCore.QRect(700, 150, 500, 50))
-        self.grasp_object_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        # --- Grasp Water Spot Button ---
+        self.grasp_water_button = QtWidgets.QPushButton(self.gui)
+        self.grasp_water_button.setGeometry(QtCore.QRect(700, 150, 200, 50))
+        self.grasp_water_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
-        self.grasp_object_button.setObjectName("grasp_object_button")
-        self.grasp_object_button.setText("Grasp Water")
-        self.grasp_object_button.clicked.connect(self.grasp_water)
-        self.grasp_object_button.show()
+        self.grasp_water_button.setObjectName("grasp_object_button")
+        self.grasp_water_button.setText("Grasp Water")
+        self.grasp_water_button.clicked.connect(self.grasp_water)
+        self.grasp_water_button.show()
+
+        # --- Grasp Soda Spot Button ---
+        self.grasp_soda_button = QtWidgets.QPushButton(self.gui)
+        self.grasp_soda_button.setGeometry(QtCore.QRect(700, 250, 200, 50))
+        self.grasp_soda_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.grasp_soda_button.setObjectName("grasp_soda_button")
+        self.grasp_soda_button.setText("Grasp Soda")
+        self.grasp_soda_button.clicked.connect(self.grasp_soda)
+        self.grasp_soda_button.show()
+
+         # --- Gripper Open Button ---
+        self.gripper_open_button = QtWidgets.QPushButton(self.gui)
+        self.gripper_open_button.setGeometry(QtCore.QRect(1000, 50, 200, 50))
+        self.gripper_open_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.gripper_open_button.setObjectName("gripper_open_button")
+        self.gripper_open_button.setText("Open Gripper")
+        self.gripper_open_button.clicked.connect(self.open_gripper)
+        self.gripper_open_button.show()
+
+         # --- Gripper Close Button ---
+        self.gripper_close_button = QtWidgets.QPushButton(self.gui)
+        self.gripper_close_button.setGeometry(QtCore.QRect(1000, 150, 200, 50))
+        self.gripper_close_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.gripper_close_button.setObjectName("gripper_close_button")
+        self.gripper_close_button.setText("Close Gripper")
+        self.gripper_close_button.clicked.connect(self.close_gripper)
+        self.gripper_close_button.show()
+
+         # --- Stow Arm Button ---
+        self.stow_arm_button = QtWidgets.QPushButton(self.gui)
+        self.stow_arm_button.setGeometry(QtCore.QRect(1000, 250, 200, 50))
+        self.stow_arm_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.stow_arm_button.setObjectName("stow_arm_button")
+        self.stow_arm_button.setText("Stow Arm")
+        self.stow_arm_button.clicked.connect(self.stow_arm)
+        self.stow_arm_button.show()
+
+        # --- Hand off object Spot Button ---
+        self.hand_off_button = QtWidgets.QPushButton(self.gui)
+        self.hand_off_button.setGeometry(QtCore.QRect(1300, 50, 200, 50))
+        self.hand_off_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.hand_off_button.setObjectName("hand_off_button")
+        self.hand_off_button.setText("Hand Object")
+        self.hand_off_button.clicked.connect(self.spot_hand_off_pos)
+        self.hand_off_button.show()
+
+         # --- Return Object Button ---
+        self.return_object_button = QtWidgets.QPushButton(self.gui)
+        self.return_object_button.setGeometry(QtCore.QRect(1300, 150, 200, 50))
+        self.return_object_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.return_object_button.setObjectName("return_object_button")
+        self.return_object_button.setText("Return Object")
+        self.return_object_button.clicked.connect(self.return_obj)
+        self.return_object_button.show()
+
+         # --- Accept Button ---
+        self.accept_button = QtWidgets.QPushButton(self.gui)
+        self.accept_button.setGeometry(QtCore.QRect(1300, 250, 200, 50))
+        self.accept_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.accept_button.setObjectName("accept_button")
+        self.accept_button.setText("Accept")
+        self.accept_button.clicked.connect(self.accepted_obj)
+        self.accept_button.show()
+
+         # -- Deny Button ---
+        self.deny_button = QtWidgets.QPushButton(self.gui)
+        self.deny_button.setGeometry(QtCore.QRect(1300, 350, 200, 50))
+        self.deny_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.deny_button.setObjectName("deny_button")
+        self.deny_button.setText("Deny")
+        self.deny_button.clicked.connect(self.denied_obj)
+        self.deny_button.show()
+
 
         # --- Plot ---
         num_rounds = 10
@@ -345,7 +479,7 @@ class CameraProcessNode(Node):
         self.plot_graph.showGrid(x=True, y=True)
         # self.plot_graph.setYRange(20, 40)
         # self.layout.addWidget(self.plot_graph, 0, 1, 3, 1)  # plot goes on right side, spanning 3 rows
-        self.plot_graph.setGeometry(QtCore.QRect(1400, 500, 1200, 800))
+        self.plot_graph.setGeometry(QtCore.QRect(900, 500, 800, 600))
         # cm = pg.colormap.get('Set2', source='matplotlib')
         cm = [
             "#08F7FE",  # teal/cyan
@@ -370,12 +504,50 @@ class CameraProcessNode(Node):
             )
         # self.plot_graph.show()
 
+    def accepted_obj(self):
+        self.get_logger().info("Human accepted object")
+
+    def denied_obj(self):
+        self.get_logger().info("Human denied object")
+
+    def return_obj(self):
+        self.get_logger().info("Returning Object")
+        msg = SendBool.Goal()
+        msg.state = True
+        self.return_obj_client.wait_for_server()
+        return self.return_obj_client.send_goal(msg)
+
+    def open_gripper(self):
+        message = Gripper.Goal()
+        message.gripper_state = False
+        self.gripper_service_client.wait_for_server()
+        return self.gripper_service_client.send_goal(message)
+    
+    def close_gripper(self):
+        message = Gripper.Goal()
+        message.gripper_state = True
+        self.gripper_service_client.wait_for_server()
+        return self.gripper_service_client.send_goal(message)
+    
+    def stow_arm(self):
+        msg = SendBool.Goal()
+        msg.state = True
+        self.stow_arm_client.wait_for_server()
+        return self.stow_arm_client.send_goal(msg)
+
     def grasp_water(self):
         self.get_logger().info("Called Grasp Water")
         msg = SendInt.Goal()
-        msg.data = 12
+        msg.data = 5
         self.grasp_tag_service_client.wait_for_server()
         output = self.grasp_tag_service_client.send_goal_async(msg)
+
+    def grasp_soda(self):# righ now this should just do the same thing as soda, just testing button
+        self.get_logger().info("Called Grasp Soda")
+        msg = SendInt.Goal()
+        msg.data = 6
+        self.grasp_tag_service_client.wait_for_server()
+        output = self.grasp_tag_service_client.send_goal_async(msg)    
 
     def set_image_callback(self, msg):
         """Callback for each new image captured by ZED Camera"""
