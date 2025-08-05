@@ -11,20 +11,13 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from sensor_msgs.msg import CompressedImage, Joy
 from rclpy.executors import MultiThreadedExecutor
-from std_msgs.msg import String, Header, Bool, String, Int32
+from std_msgs.msg import Header, Bool, Float64MultiArray
 from geometry_msgs.msg import (
     TransformStamped,
     Transform,
     Vector3,
     Quaternion,
-    PoseStamped,
-    Pose,
-    Point,
-    PoseArray,
 )
-from tf2_msgs.msg import TFMessage
-from tf2_ros.transform_listener import TransformListener
-from tf2_ros.buffer import Buffer
 from custom_actions.action import (
     Gripper,
     GraspObject,
@@ -35,6 +28,7 @@ from custom_actions.action import (
     SendInt,
 )
 
+import pyqtgraph as pg
 
 from builtin_interfaces.msg import Time  # I dont know what this is but we need it
 
@@ -42,11 +36,8 @@ from builtin_interfaces.msg import Time  # I dont know what this is but we need 
 
 # Boston Dynamics
 
-from bosdyn.client.math_helpers import SE3Pose, Quat
-
 
 # Spot Driver
-from spot_msgs.msg import BatteryStateArray
 
 
 # PyQt5
@@ -74,9 +65,6 @@ from apriltag import apriltag
 
 # Data Collection
 import csv
-
-from .decision_making import simulation_loop
-import pyqtgraph as pg
 
 
 class CameraProcessNode(Node):
@@ -131,14 +119,16 @@ class CameraProcessNode(Node):
             self, Gripper, "desired_gripper_state"
         )
 
-        self.stow_arm_client = ActionClient(
-            self, SendBool, "stow_arm"
-        )
+        self.stow_arm_client = ActionClient(self, SendBool, "stow_arm")
 
-        self.return_obj_client = ActionClient(
-            self, SendBool, "return_obj"
-        )
+        self.return_obj_client = ActionClient(self, SendBool, "return_obj")
         # publish nearest tag
+
+        # Publishers for the MUAB
+
+        self.update_human_reward = self.create_publisher(Bool, "human_reward", 10)
+        self.update_robot_reward = self.create_publisher(Bool, "robot_reward", 10)
+
         # self.closest_apriltag_pub = self.create_publisher(String, 'closest_tag', 10)
 
         # Stop/Warn Controller Input
@@ -187,10 +177,36 @@ class CameraProcessNode(Node):
             12: {"name": "powder", "present": False},
         }
 
+        # Reward history
+        self.reward_history = {}
+        self.create_subscription(
+            Float64MultiArray, "/reward_history_boltzmann", self.boltzmann_callback, 10
+        )
+        self.create_subscription(
+            Float64MultiArray, "/reward_history_ucb", self.ucb_callback, 10
+        )
+        self.create_subscription(
+            Float64MultiArray, "/reward_history_human", self.human_callback, 10
+        )
+
         # GUI Intialization
         self.gui = QMainWindow()
         self.initGUI()
         self.gui.show()
+
+    def boltzmann_callback(self, msg):
+        self.get_logger().info(
+            f"Subscribed to reward history for Boltzmann: {msg.data}"
+        )
+        self.reward_history["Boltzmann"] = msg.data
+
+    def ucb_callback(self, msg):
+        self.get_logger().info(f"Subscribed to reward history for UCB: {msg.data}")
+        self.reward_history["UCB"] = msg.data
+
+    def human_callback(self, msg):
+        self.get_logger().info(f"Subscribed to reward history for Human: {msg.data}")
+        self.reward_history["Human"] = msg.data
 
     def controller_input_callback(self, msg):
         if msg.buttons[1]:  # B
@@ -294,21 +310,18 @@ class CameraProcessNode(Node):
         msg = SendPose.Goal()
         msg.pose = message
         self.desired_arm_body_pose_nc_service_client.wait_for_server()
-        output = self.desired_arm_body_pose_nc_service_client.send_goal_async(msg)
-
-
-
+        self.desired_arm_body_pose_nc_service_client.send_goal_async(msg)
 
     def spot_hand_off_pos(self):
         # this moves Spot's arm into the hand off position
 
         # ensures Spot's gripper is closed
-        #self.get_logger().info("CLOSING GRIPPER", throttle_duration_sec=3)
-        #message = Gripper.Goal()
-        #message.gripper_state = True
-        #self.gripper_service_client.wait_for_server()
-        #self.gripper_service_client.send_goal_async(message)
-        #self.get_logger().info("Gripper Closed", throttle_duration_sec=3)
+        # self.get_logger().info("CLOSING GRIPPER", throttle_duration_sec=3)
+        # message = Gripper.Goal()
+        # message.gripper_state = True
+        # self.gripper_service_client.wait_for_server()
+        # self.gripper_service_client.send_goal_async(message)
+        # self.get_logger().info("Gripper Closed", throttle_duration_sec=3)
         # Create arm pose message
         self.get_logger().info("MOVING ARM", throttle_duration_sec=3)
         message = TransformStamped()
@@ -339,7 +352,7 @@ class CameraProcessNode(Node):
         msg = SendPose.Goal()
         msg.pose = message
         self.desired_arm_body_pose_nc_service_client.wait_for_server()
-        output = self.desired_arm_body_pose_nc_service_client.send_goal_async(msg)
+        self.desired_arm_body_pose_nc_service_client.send_goal_async(msg)
 
     def initGUI(self):
         """Initializes basic GUI elements"""
@@ -392,7 +405,7 @@ class CameraProcessNode(Node):
         self.grasp_soda_button.clicked.connect(self.grasp_soda)
         self.grasp_soda_button.show()
 
-         # --- Gripper Open Button ---
+        # --- Gripper Open Button ---
         self.gripper_open_button = QtWidgets.QPushButton(self.gui)
         self.gripper_open_button.setGeometry(QtCore.QRect(1000, 50, 200, 50))
         self.gripper_open_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
@@ -402,7 +415,7 @@ class CameraProcessNode(Node):
         self.gripper_open_button.clicked.connect(self.open_gripper)
         self.gripper_open_button.show()
 
-         # --- Gripper Close Button ---
+        # --- Gripper Close Button ---
         self.gripper_close_button = QtWidgets.QPushButton(self.gui)
         self.gripper_close_button.setGeometry(QtCore.QRect(1000, 150, 200, 50))
         self.gripper_close_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
@@ -412,7 +425,7 @@ class CameraProcessNode(Node):
         self.gripper_close_button.clicked.connect(self.close_gripper)
         self.gripper_close_button.show()
 
-         # --- Stow Arm Button ---
+        # --- Stow Arm Button ---
         self.stow_arm_button = QtWidgets.QPushButton(self.gui)
         self.stow_arm_button.setGeometry(QtCore.QRect(1000, 250, 200, 50))
         self.stow_arm_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
@@ -432,7 +445,7 @@ class CameraProcessNode(Node):
         self.hand_off_button.clicked.connect(self.spot_hand_off_pos)
         self.hand_off_button.show()
 
-         # --- Return Object Button ---
+        # --- Return Object Button ---
         self.return_object_button = QtWidgets.QPushButton(self.gui)
         self.return_object_button.setGeometry(QtCore.QRect(1300, 150, 200, 50))
         self.return_object_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
@@ -442,7 +455,7 @@ class CameraProcessNode(Node):
         self.return_object_button.clicked.connect(self.return_obj)
         self.return_object_button.show()
 
-         # --- Accept Button ---
+        # --- Accept Button ---
         self.accept_button = QtWidgets.QPushButton(self.gui)
         self.accept_button.setGeometry(QtCore.QRect(1300, 250, 200, 50))
         self.accept_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
@@ -452,7 +465,7 @@ class CameraProcessNode(Node):
         self.accept_button.clicked.connect(self.accepted_obj)
         self.accept_button.show()
 
-         # -- Deny Button ---
+        # -- Deny Button ---
         self.deny_button = QtWidgets.QPushButton(self.gui)
         self.deny_button.setGeometry(QtCore.QRect(1300, 350, 200, 50))
         self.deny_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
@@ -462,53 +475,60 @@ class CameraProcessNode(Node):
         self.deny_button.clicked.connect(self.denied_obj)
         self.deny_button.show()
 
-
-        # --- Plot ---
-        num_rounds = 10
-        reward_history = simulation_loop(num_rounds=num_rounds)
-        self.plot_graph = pg.PlotWidget(self.gui)
-        # self.setCentralWidget(self.plot_graph)
-        self.plot_graph.setBackground("#212946")
-        self.plot_graph.setTitle(
-            "Bandit Strategies: Boltzmann vs UCB1", color="w", size="14pt"
-        )
-        styles = {"color": "white", "font-size": "30px"}
-        self.plot_graph.setLabel("left", "Cumulative Reward", **styles)
-        self.plot_graph.setLabel("bottom", "Round", **styles)
-        self.plot_graph.addLegend()
-        self.plot_graph.showGrid(x=True, y=True)
-        # self.plot_graph.setYRange(20, 40)
-        # self.layout.addWidget(self.plot_graph, 0, 1, 3, 1)  # plot goes on right side, spanning 3 rows
-        self.plot_graph.setGeometry(QtCore.QRect(900, 500, 800, 600))
-        # cm = pg.colormap.get('Set2', source='matplotlib')
-        cm = [
-            "#08F7FE",  # teal/cyan
-            "#FE53BB",  # pink
-            "#F5D300",  # yellow
-            "#00ff41",  # matrix green
-        ]
-        self.Round = np.arange(0, num_rounds)
-        self.cum_reward = {}
-        self.line = {}
-        for idx, label in enumerate(reward_history):
-            pen = pg.mkPen(color=cm[idx])
-            self.cum_reward[label] = np.cumsum(reward_history[label])
-            self.line[label] = self.plot_graph.plot(
-                self.Round,
-                self.cum_reward[label],
-                name=label.capitalize(),
-                pen=pen,
-                # symbol="o",
-                # symbolSize=5,
-                # symbolBrush="b",
+    def update_plot(self):
+        if self.reward_history.get("UCB"):
+            num_rounds = len(self.reward_history["UCB"])
+            self.plot_graph = pg.PlotWidget(self.gui)
+            # self.setCentralWidget(self.plot_graph)
+            self.plot_graph.setBackground("#212946")
+            self.plot_graph.setTitle(
+                "Bandit Strategies: Boltzmann vs UCB1", color="w", size="14pt"
             )
-        # self.plot_graph.show()
+            styles = {"color": "white", "font-size": "30px"}
+            self.plot_graph.setLabel("left", "Cumulative Reward", **styles)
+            self.plot_graph.setLabel("bottom", "Round", **styles)
+            self.plot_graph.addLegend()
+            self.plot_graph.showGrid(x=True, y=True)
+            # self.plot_graph.setYRange(20, 40)
+            # self.layout.addWidget(self.plot_graph, 0, 1, 3, 1)  # plot goes on right side, spanning 3 rows
+            self.plot_graph.setGeometry(QtCore.QRect(1400, 500, 1200, 800))
+            # cm = pg.colormap.get('Set2', source='matplotlib')
+            cm = [
+                "#08F7FE",  # teal/cyan
+                "#FE53BB",  # pink
+                "#F5D300",  # yellow
+                "#00ff41",  # matrix green
+            ]
+            self.Round = np.arange(0, num_rounds)
+            self.cum_reward = {}
+            self.line = {}
+            for idx, label in enumerate(self.reward_history):
+                pen = pg.mkPen(color=cm[idx])
+                self.cum_reward[label] = np.cumsum(self.reward_history[label])
+                self.line[label] = self.plot_graph.plot(
+                    self.Round,
+                    self.cum_reward[label],
+                    name=label.capitalize(),
+                    pen=pen,
+                    # symbol="o",
+                    # symbolSize=5,
+                    # symbolBrush="b",
+                )
+            self.plot_graph.show()
 
     def accepted_obj(self):
         self.get_logger().info("Human accepted object")
+        msg = Bool()
+        msg.data = True
+        self.update_human_reward.publish(msg)
+        self.get_logger().info(f"publishing : {msg.data}")
 
     def denied_obj(self):
         self.get_logger().info("Human denied object")
+        msg = Bool()
+        msg.data = False
+        self.update_human_reward.publish(msg)
+        self.get_logger().info(f"publishing : {msg.data}")
 
     def return_obj(self):
         self.get_logger().info("Returning Object")
@@ -522,13 +542,13 @@ class CameraProcessNode(Node):
         message.gripper_state = False
         self.gripper_service_client.wait_for_server()
         return self.gripper_service_client.send_goal(message)
-    
+
     def close_gripper(self):
         message = Gripper.Goal()
         message.gripper_state = True
         self.gripper_service_client.wait_for_server()
         return self.gripper_service_client.send_goal(message)
-    
+
     def stow_arm(self):
         msg = SendBool.Goal()
         msg.state = True
@@ -537,17 +557,27 @@ class CameraProcessNode(Node):
 
     def grasp_water(self):
         self.get_logger().info("Called Grasp Water")
+        msg_reward = Bool()
+        msg_reward.data = True
+        self.update_robot_reward.publish(msg_reward)
+
         msg = SendInt.Goal()
         msg.data = 5
         self.grasp_tag_service_client.wait_for_server()
-        output = self.grasp_tag_service_client.send_goal_async(msg)
+        self.grasp_tag_service_client.send_goal_async(msg)
 
-    def grasp_soda(self):# righ now this should just do the same thing as soda, just testing button
+    def grasp_soda(
+        self,
+    ):  # righ now this should just do the same thing as soda, just testing button
         self.get_logger().info("Called Grasp Soda")
+        msg_reward = Bool()
+        msg_reward.data = False
+        self.update_robot_reward.publish(msg_reward)
+
         msg = SendInt.Goal()
         msg.data = 6
         self.grasp_tag_service_client.wait_for_server()
-        output = self.grasp_tag_service_client.send_goal_async(msg)    
+        self.grasp_tag_service_client.send_goal_async(msg)
 
     def set_image_callback(self, msg):
         """Callback for each new image captured by ZED Camera"""
@@ -787,6 +817,7 @@ class CameraProcessNode(Node):
         while True:
             app.processEvents()
             self.update_image_callback()
+            self.update_plot()
         self.get_logger().info("QUITTING APP")
         app.quit()
         return

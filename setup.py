@@ -26,6 +26,7 @@ setup(
             "robot_controller = coop_spot.robot_controller:main",
             "infer_node = coop_spot.infer_node:main",
             "calibrate = coop_spot.calibrate:main",
+            "decision_making = coop_spot.decision_making:main",
         ],
     },
 )

@@ -21,6 +21,12 @@ def generate_launch_description():
                 output="screen",
                 emulate_tty=True,
             ),
+            Node(
+                package="coop_spot",
+                executable="decision_making",
+                output="screen",
+                emulate_tty=True,
+            ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     os.path.join(
