@@ -77,7 +77,7 @@ from bosdyn.client.frame_helpers import (
     ODOM_FRAME_NAME,
     HAND_FRAME_NAME,
     add_edge_to_tree,
-    math_helpers
+    math_helpers,
 )
 from bosdyn.client.math_helpers import SE3Pose, Quat
 import bosdyn.client.util
@@ -171,9 +171,7 @@ class RobotController(Node):
             self, Gripper, "desired_gripper_state", self.desired_gripper_state_callback
         )
 
-        self.stow_arm_service = ActionServer(
-            self, SendBool, "stow_arm", self.stow_arm
-        )
+        self.stow_arm_service = ActionServer(self, SendBool, "stow_arm", self.stow_arm)
 
         self.return_obj_service = ActionServer(
             self, SendBool, "return_obj", self.return_obj
@@ -231,8 +229,6 @@ class RobotController(Node):
             # Dictionary values: use_extrinsics_guess bool, (rotation vector, translation vector) tuple.
             camera_to_extrinsics_guess[src] = (False, (None, None))
         return camera_to_extrinsics_guess
-
-        
 
     def calibration_timer_callback(self):
         # Make sure previous transform exists
@@ -502,7 +498,7 @@ class RobotController(Node):
             result = SendBool.Result()
             result.success = True
             return result
-        
+
         result = SendBool.Result()
         result.sucess = False
         return result
@@ -953,15 +949,15 @@ class RobotController(Node):
         # Returning hand to position after the grasp
         self.get_logger().info("Inside return_obj in robot_controller")
         arm_command = RobotCommandBuilder.arm_pose_command(
-        x=self.after_grasp_loc.x,
-        y=self.after_grasp_loc.y,
-        z=self.after_grasp_loc.z,
-        qw=self.after_grasp_loc.rot.w,
-        qx=self.after_grasp_loc.rot.x,
-        qy=self.after_grasp_loc.rot.y,
-        qz=self.after_grasp_loc.rot.z,
-        frame_name=BODY_FRAME_NAME,
-        seconds=5,
+            x=self.after_grasp_loc.x,
+            y=self.after_grasp_loc.y,
+            z=self.after_grasp_loc.z,
+            qw=self.after_grasp_loc.rot.w,
+            qx=self.after_grasp_loc.rot.x,
+            qy=self.after_grasp_loc.rot.y,
+            qz=self.after_grasp_loc.rot.z,
+            frame_name=VISION_FRAME_NAME,
+            seconds=3,
         )
         arm_command.synchronized_command.arm_command.arm_cartesian_command.max_linear_velocity.value = self.max_arm_lin_vel
         arm_command.synchronized_command.arm_command.arm_cartesian_command.max_angular_velocity.value = self.max_grasp_ang_vel
@@ -973,28 +969,30 @@ class RobotController(Node):
         output = self.block_until_arm_arrives_interruptable(
             self.robot_command_client, cmd_id, timeout_sec=5
         )
-        
+
         result = SendBool.Result()
         msg.succeed()
         result.success = True
         return result
 
-
-
     def store_arm_coords(self):
         # Request the robot state
         # check transform from tag to hand (if available)
         self.get_logger().info("Storing arm coordinates...")
-        robot_state_transforms = (
-            self.robot_state_client.get_robot_state().kinematic_state.transforms_snapshot
-        )
+        robot_state_transforms = self.robot_state_client.get_robot_state().kinematic_state.transforms_snapshot
         body_tform_hand = get_a_tform_b(
-            robot_state_transforms, BODY_FRAME_NAME, HAND_FRAME_NAME
+            robot_state_transforms, VISION_FRAME_NAME, HAND_FRAME_NAME
         )
 
         self.after_grasp_loc = body_tform_hand
 
         self.get_logger().info(str(self.after_grasp_loc))
+
+    def apply_force_constraint(self, grasp):
+        self.get_logger().info("Applying grasp constraints")
+        grasp.grasp_params.grasp_params_frame_name = VISION_FRAME_NAME
+
+        grasp.grasp_params.grasp_palm_to_fingertip = 0.2
 
     def grasp_tag(self, msg):
         """Use the position of the april tag in vision world frame and command the robot to grasp the attach object"""
@@ -1013,6 +1011,10 @@ class RobotController(Node):
             frame_name_image_sensor=image.shot.frame_name_image_sensor,
             camera_model=image.source.pinhole,
         )
+
+        # Apply constraints
+        self.apply_force_constraint(grasp)
+
 
         # Ask the robot to pick up the object
         grasp_request = manipulation_api_pb2.ManipulationApiRequest(
@@ -1057,7 +1059,6 @@ class RobotController(Node):
         result = SendInt.Result()
         result.success = True
         return result
-
 
     def go_to_tag(self, fiducial_rt_world):
         """Use the position of the april tag in vision world frame and command the robot."""

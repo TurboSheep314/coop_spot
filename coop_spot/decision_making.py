@@ -64,7 +64,6 @@ class DecisionMaker(Node):
                 self.ucb_pub.publish(Float64MultiArray(data=data))
             elif key.lower() == "human":
                 self.human_pub.publish(Float64MultiArray(data=data))
-            self.get_logger().info(f"Publishing reward history for {key}: {data}")
 
     # --- CALLBACKS ---
 
@@ -85,6 +84,7 @@ class DecisionMaker(Node):
 
         # --- UCB Policy ---
         arm_ucb = self.ucb1(self.round)
+        #self.get_logger().info(f"bick bottle number {arm_ucb}")
         r_ucb = 1 if np.random.rand() < self.true_probs[arm_ucb] else 0
         self.arm_counts_ucb[arm_ucb] += 1
         self.arm_rewards_ucb[arm_ucb] += r_ucb
@@ -102,10 +102,6 @@ class DecisionMaker(Node):
         self.arm_counts_boltz[arm_boltz] += 1
         self.arm_rewards_boltz[arm_boltz] += r_boltz
         self.reward_history["Boltzmann"].append(r_boltz)
-
-        self.get_logger().info(
-            f"[Round {self.round}] UCB Arm: {arm_ucb}, Reward: {r_ucb} | Boltzmann Arm: {arm_boltz}, Reward: {r_boltz}"
-        )
 
     # --- POLICIES ---
 

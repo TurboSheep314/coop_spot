@@ -195,18 +195,14 @@ class CameraProcessNode(Node):
         self.gui.show()
 
     def boltzmann_callback(self, msg):
-        self.get_logger().info(
-            f"Subscribed to reward history for Boltzmann: {msg.data}"
-        )
         self.reward_history["Boltzmann"] = msg.data
 
     def ucb_callback(self, msg):
-        self.get_logger().info(f"Subscribed to reward history for UCB: {msg.data}")
         self.reward_history["UCB"] = msg.data
 
     def human_callback(self, msg):
-        self.get_logger().info(f"Subscribed to reward history for Human: {msg.data}")
         self.reward_history["Human"] = msg.data
+        
 
     def controller_input_callback(self, msg):
         if msg.buttons[1]:  # B
@@ -370,7 +366,7 @@ class CameraProcessNode(Node):
         # self.top_row.setLayout(top_row_layout)
 
         self.veltext = QtWidgets.QLabel(self.gui)
-        self.veltext.setGeometry(QtCore.QRect(100, 0, 800, 200))
+        self.veltext.setGeometry(QtCore.QRect(100, 500, 1600, 200))
         self.proxtext = QtWidgets.QLabel(self.gui)
         self.proxtext.setGeometry(QtCore.QRect(100, 50, 800, 200))
 
@@ -502,33 +498,43 @@ class CameraProcessNode(Node):
             self.Round = np.arange(0, num_rounds)
             self.cum_reward = {}
             self.line = {}
+
             for idx, label in enumerate(self.reward_history):
                 pen = pg.mkPen(color=cm[idx])
                 self.cum_reward[label] = np.cumsum(self.reward_history[label])
-                self.line[label] = self.plot_graph.plot(
-                    self.Round,
-                    self.cum_reward[label],
-                    name=label.capitalize(),
-                    pen=pen,
-                    # symbol="o",
-                    # symbolSize=5,
-                    # symbolBrush="b",
-                )
-            self.plot_graph.show()
+
+                if label == "Human" and len(self.cum_reward["Human"]) < len(self.cum_reward["UCB"]):
+                    return
+                if label == "Human":
+                    self.veltext.setText("UCB: " + str(np.sum(self.cum_reward["UCB"])) + " Boltzmann: " + str(np.sum(self.cum_reward["Boltzmann"])) + " Human: " + str(np.sum(self.cum_reward["Human"])))
+                    self.veltext.show()
+
+                # self.line[label] = self.plot_graph.plot(
+                #     self.Round,
+                #     self.cum_reward[label],
+                #     name=label.capitalize(),
+                #     pen=pen,
+                #     # symbol="o",
+                #     # symbolSize=5,
+                #     # symbolBrush="b",
+                # )
+                
+
+
+            # self.plot_graph.show()
+            #self.get_logger().info(f"Shapes H:{self.line['Human'].shape}, R:{self.line['UCB'].shape},B:{self.line['Boltzmann'].shape}")
 
     def accepted_obj(self):
         self.get_logger().info("Human accepted object")
         msg = Bool()
         msg.data = True
         self.update_human_reward.publish(msg)
-        self.get_logger().info(f"publishing : {msg.data}")
 
     def denied_obj(self):
         self.get_logger().info("Human denied object")
         msg = Bool()
         msg.data = False
         self.update_human_reward.publish(msg)
-        self.get_logger().info(f"publishing : {msg.data}")
 
     def return_obj(self):
         self.get_logger().info("Returning Object")
@@ -562,7 +568,7 @@ class CameraProcessNode(Node):
         self.update_robot_reward.publish(msg_reward)
 
         msg = SendInt.Goal()
-        msg.data = 5
+        msg.data = 58
         self.grasp_tag_service_client.wait_for_server()
         self.grasp_tag_service_client.send_goal_async(msg)
 
@@ -575,7 +581,7 @@ class CameraProcessNode(Node):
         self.update_robot_reward.publish(msg_reward)
 
         msg = SendInt.Goal()
-        msg.data = 6
+        msg.data = 60
         self.grasp_tag_service_client.wait_for_server()
         self.grasp_tag_service_client.send_goal_async(msg)
 
@@ -792,7 +798,7 @@ class CameraProcessNode(Node):
             label.setPixmap(pixmap)
             label.show()
 
-            self.veltext.setText("Wrist velocity: " + " ".join(map(str, self.velocity)))
+            #self.veltext.setText("Wrist velocity: " + " ".join(map(str, self.velocity)))
             self.proxtext.setText(
                 "Closest Apriltag: " + " ".join(map(str, self.closest_apriltag))
             )
