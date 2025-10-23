@@ -202,7 +202,6 @@ class CameraProcessNode(Node):
 
     def human_callback(self, msg):
         self.reward_history["Human"] = msg.data
-        
 
     def controller_input_callback(self, msg):
         if msg.buttons[1]:  # B
@@ -503,10 +502,19 @@ class CameraProcessNode(Node):
                 pen = pg.mkPen(color=cm[idx])
                 self.cum_reward[label] = np.cumsum(self.reward_history[label])
 
-                if label == "Human" and len(self.cum_reward["Human"]) < len(self.cum_reward["UCB"]):
+                if label == "Human" and len(self.cum_reward["Human"]) < len(
+                    self.cum_reward["UCB"]
+                ):
                     return
                 if label == "Human":
-                    self.veltext.setText("UCB: " + str(np.sum(self.cum_reward["UCB"])) + " Boltzmann: " + str(np.sum(self.cum_reward["Boltzmann"])) + " Human: " + str(np.sum(self.cum_reward["Human"])))
+                    self.veltext.setText(
+                        "UCB: "
+                        + str(np.sum(self.cum_reward["UCB"]))
+                        + " Boltzmann: "
+                        + str(np.sum(self.cum_reward["Boltzmann"]))
+                        + " Human: "
+                        + str(np.sum(self.cum_reward["Human"]))
+                    )
                     self.veltext.show()
 
                 # self.line[label] = self.plot_graph.plot(
@@ -518,11 +526,9 @@ class CameraProcessNode(Node):
                 #     # symbolSize=5,
                 #     # symbolBrush="b",
                 # )
-                
-
 
             # self.plot_graph.show()
-            #self.get_logger().info(f"Shapes H:{self.line['Human'].shape}, R:{self.line['UCB'].shape},B:{self.line['Boltzmann'].shape}")
+            # self.get_logger().info(f"Shapes H:{self.line['Human'].shape}, R:{self.line['UCB'].shape},B:{self.line['Boltzmann'].shape}")
 
     def accepted_obj(self):
         self.get_logger().info("Human accepted object")
@@ -798,7 +804,7 @@ class CameraProcessNode(Node):
             label.setPixmap(pixmap)
             label.show()
 
-            #self.veltext.setText("Wrist velocity: " + " ".join(map(str, self.velocity)))
+            # self.veltext.setText("Wrist velocity: " + " ".join(map(str, self.velocity)))
             self.proxtext.setText(
                 "Closest Apriltag: " + " ".join(map(str, self.closest_apriltag))
             )

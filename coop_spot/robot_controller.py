@@ -1015,7 +1015,6 @@ class RobotController(Node):
         # Apply constraints
         self.apply_force_constraint(grasp)
 
-
         # Ask the robot to pick up the object
         grasp_request = manipulation_api_pb2.ManipulationApiRequest(
             pick_object_in_image=grasp

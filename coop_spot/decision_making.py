@@ -84,7 +84,7 @@ class DecisionMaker(Node):
 
         # --- UCB Policy ---
         arm_ucb = self.ucb1(self.round)
-        #self.get_logger().info(f"bick bottle number {arm_ucb}")
+        # self.get_logger().info(f"bick bottle number {arm_ucb}")
         r_ucb = 1 if np.random.rand() < self.true_probs[arm_ucb] else 0
         self.arm_counts_ucb[arm_ucb] += 1
         self.arm_rewards_ucb[arm_ucb] += r_ucb
