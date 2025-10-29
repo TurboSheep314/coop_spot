@@ -349,6 +349,59 @@ class CameraProcessNode(Node):
         self.desired_arm_body_pose_nc_service_client.wait_for_server()
         self.desired_arm_body_pose_nc_service_client.send_goal_async(msg)
 
+    def point_left_right(self, direction):
+        # Points Spot's arm towards `direction`
+
+        # ensures Spot's gripper is closed
+        # self.get_logger().info("CLOSING GRIPPER", throttle_duration_sec=3)
+        # message = Gripper.Goal()
+        # message.gripper_state = True
+        # self.gripper_service_client.wait_for_server()
+        # self.gripper_service_client.send_goal_async(message)
+        # self.get_logger().info("Gripper Closed", throttle_duration_sec=3)
+        # Create arm pose message
+        self.get_logger().info("MOVING ARM", throttle_duration_sec=3)
+        message = TransformStamped()
+        message.header = Header()
+        message.header.stamp = Time()
+        t = time.time()
+        message.header.stamp.sec = int(t)
+        message.header.stamp.nanosec = int((t - int(t)) * 1e9)
+        message.header.frame_id = "body"
+        message.child_frame_id = "hand"
+        message.transform = Transform()
+        message.transform.translation = Vector3()
+        message.transform.rotation = Quaternion()
+        if direction == "left":
+            message.transform.translation.x = 0.5
+            message.transform.translation.y = 0.5
+            message.transform.translation.z = 0.5
+            message.transform.rotation.x = 0.0
+            message.transform.rotation.y = 0.216
+            message.transform.rotation.z = 0.0
+            message.transform.rotation.w = 0.976
+
+        elif direction == "right":
+            message.transform.translation.x = 0.5
+            message.transform.translation.y = -0.5
+            message.transform.translation.z = 0.5
+            message.transform.rotation.x = 0.153
+            message.transform.rotation.y = 0.153
+            message.transform.rotation.z = 0.691
+            message.transform.rotation.w = 0.691
+        else:
+            self.get_logger().error(
+                "The direction can only be `left` or `right`, no action taken"
+            )
+            return
+
+        # Send the message to robot_controller
+        # self.desired_arm_body_pose_pub.publish(message)
+        msg = SendPose.Goal()
+        msg.pose = message
+        self.desired_arm_body_pose_nc_service_client.wait_for_server()
+        self.desired_arm_body_pose_nc_service_client.send_goal_async(msg)
+
     def initGUI(self):
         """Initializes basic GUI elements"""
         self.gui.setWindowTitle("ZED camera")
@@ -439,6 +492,31 @@ class CameraProcessNode(Node):
         self.hand_off_button.setText("Hand Object")
         self.hand_off_button.clicked.connect(self.spot_hand_off_pos)
         self.hand_off_button.show()
+
+        # --- Point direction buttons ---
+        self.point_direction_button = QtWidgets.QPushButton(self.gui)
+        self.point_direction_button.setGeometry(QtCore.QRect(1600, 50, 200, 50))
+        self.point_direction_button.setCursor(
+            QtGui.QCursor(QtCore.Qt.PointingHandCursor)
+        )
+        self.point_direction_button.setObjectName("point_left_button")
+        self.point_direction_button.setText("Point left")
+        self.point_direction_button.clicked.connect(
+            lambda: self.point_left_right(direction="left")
+        )
+        self.point_direction_button.show()
+
+        self.point_direction_button = QtWidgets.QPushButton(self.gui)
+        self.point_direction_button.setGeometry(QtCore.QRect(1600, 150, 200, 50))
+        self.point_direction_button.setCursor(
+            QtGui.QCursor(QtCore.Qt.PointingHandCursor)
+        )
+        self.point_direction_button.setObjectName("point_right_button")
+        self.point_direction_button.setText("Point right")
+        self.point_direction_button.clicked.connect(
+            lambda: self.point_left_right(direction="right")
+        )
+        self.point_direction_button.show()
 
         # --- Return Object Button ---
         self.return_object_button = QtWidgets.QPushButton(self.gui)
