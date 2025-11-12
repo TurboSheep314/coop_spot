@@ -154,9 +154,14 @@ class RobotController(Node):
             self, SendPose, "desired_arm_tag_pose", self.desired_arm_tag_pose_callback
         )
 
-        # Listen to desired arm pose relative to the april tag reference frame
+        # Listen for desired tag to grasp
         self.arm_grasp_tag_service = ActionServer(
-            self, SendInt, "fiducial_rt_world", self.grasp_tag
+            self, SendInt, "desired_tag_to_grasp", self.grasp_tag
+        )
+
+        # Listen to desired tag to move to
+        self.goto_tag_service = ActionServer(
+            self, SendInt, "desired_tag_to_goto", self.goto_tag
         )
 
         # Publish any transforms
@@ -839,7 +844,7 @@ class RobotController(Node):
             bbox_id = detections[i]["id"]
             bboxes[bbox_id] = bbox
 
-            self.april_tags[bbox_id] = detections[i]["center"], image
+            self.april_tags[bbox_id] = detections[i], image
 
             # bboxes.append(bbox)
 
@@ -994,6 +999,50 @@ class RobotController(Node):
 
         grasp.grasp_params.grasp_palm_to_fingertip = 0.2
 
+    def goto_tag(self, msg):
+        """Use the position of the april tag in vision world frame and command the robot to move to target location"""
+        self.get.logger().info("Entered goto_tag")
+
+        tag = self.april_tags[msg.request.data]
+        source = tag[1]
+
+        (tvec, _, source_name) = self.pixel_coords_to_camera_coords(tag[0]["lb-rb-rt-lt"], self.intrinsics, source)
+
+        vision_tform_fiducial_position = self.compute_fiducial_in_world_frame(tvec)
+        fiducial_rt_world = geometry_pb2.Vec3(x=vision_tform_fiducial_position[0],
+                                              y=vision_tform_fiducial_position[1],
+                                              z=vision_tform_fiducial_position[2])
+
+        
+        # Compute the go-to point (offset by .5m from the fiducial position) and the heading at
+        # this point.
+        self._current_tag_world_pose, self._angle_desired = self.offset_tag_pose(
+            fiducial_rt_world, self._tag_offset)
+
+        #Command the robot to go to the tag in kinematic odometry frame
+        mobility_params = self.set_mobility_params()
+        tag_cmd = RobotCommandBuilder.synchro_se2_trajectory_point_command(
+            goal_x=self._current_tag_world_pose[0], goal_y=self._current_tag_world_pose[1],
+            goal_heading=self._angle_desired, frame_name=VISION_FRAME_NAME, params=mobility_params,
+            body_height=0.0, locomotion_hint=spot_command_pb2.HINT_AUTO)
+        end_time = 5.0
+        if self._movement_on and self._powered_on:
+            #Issue the command to the robot
+            self._robot_command_client.robot_command(lease=None, command=tag_cmd,
+                                                     end_time_secs=time.time() + end_time)
+            # #Feedback to check and wait until the robot is in the desired position or timeout
+            start_time = time.time()
+            current_time = time.time()
+            while (not self.final_state() and current_time - start_time < end_time):
+                time.sleep(.25)
+                current_time = time.time()
+        return
+
+
+        
+
+
+
     def grasp_tag(self, msg):
         """Use the position of the april tag in vision world frame and command the robot to grasp the attach object"""
         self.get_logger().info("Entered grasp tag")
@@ -1002,7 +1051,7 @@ class RobotController(Node):
 
         image = tag[1]
 
-        pick_vec = geometry_pb2.Vec2(x=tag[0][0], y=tag[0][1])
+        pick_vec = geometry_pb2.Vec2(x=tag[0]["center"][0], y=tag[0]["center"][1])
 
         # Build the proto
         grasp = manipulation_api_pb2.PickObjectInImage(
@@ -1058,40 +1107,6 @@ class RobotController(Node):
         result = SendInt.Result()
         result.success = True
         return result
-
-    def go_to_tag(self, fiducial_rt_world):
-        """Use the position of the april tag in vision world frame and command the robot."""
-        # Compute the go-to point (offset by .5m from the fiducial position) and the heading at
-        # this point.
-        self.current_tag_world_pose, self.angle_desired = self.offset_tag_pose(
-            fiducial_rt_world, 0.0
-        )
-
-        # Command the robot to go to the tag in kinematic odometry frame
-        tag_cmd = RobotCommandBuilder.synchro_se2_trajectory_point_command(
-            goal_x=self.current_tag_world_pose[0],
-            goal_y=self.current_tag_world_pose[1],
-            goal_heading=self.angle_desired,
-            frame_name=VISION_FRAME_NAME,
-            body_height=0.0,
-            locomotion_hint=spot_command_pb2.HINT_AUTO,
-        )
-        end_time = 5.0
-        if self.powered_on:
-            self.get_logger().info(
-                f"Goal: {self.current_tag_world_pose[0], self.current_tag_world_pose[1]}"
-            )
-            # Issue the command to the robot
-            self.robot_command_client.robot_command(
-                lease=None, command=tag_cmd, end_time_secs=time.time() + end_time
-            )
-            # #Feedback to check and wait until the robot is in the desired position or timeout
-            start_time = time.time()
-            current_time = time.time()
-            while not self.final_state() and current_time - start_time < end_time:
-                time.sleep(0.25)
-                current_time = time.time()
-        return
 
     def final_state(self):
         """Check if the current robot state is within range of the fiducial position."""

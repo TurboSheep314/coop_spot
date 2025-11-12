@@ -81,7 +81,15 @@ class CameraProcessNode(Node):
     def __init__(self):
         super().__init__("camera_node")
         # PUBLISHERS
-        self.grasp_tag_service_client = ActionClient(self, SendInt, "fiducial_rt_world")
+        self.grasp_tag_service_client = ActionClient(
+            self, SendInt, "desired_tag_to_grasp"
+        )
+        
+        # Publish what tag to move to to
+        self.goto_tag_service_client = ActionClient(
+            self, SendInt, "desired_tag_to_goto"
+        )
+
         # Publish desired arm pose relative to body reference frame
         self.desired_arm_body_pose_service_client = ActionClient(
             self, SendPose, "desired_arm_body_pose"
@@ -109,6 +117,8 @@ class CameraProcessNode(Node):
             self, GraspObject, "grasp_object"
         )
 
+     
+
         # Publish desired body pose relative to previous body reference frame
         self.desired_body_pose_service_client = ActionClient(
             self, SendPose, "desired_body_pose"
@@ -118,6 +128,7 @@ class CameraProcessNode(Node):
         self.gripper_service_client = ActionClient(
             self, Gripper, "desired_gripper_state"
         )
+
 
         self.stow_arm_client = ActionClient(self, SendBool, "stow_arm")
 
@@ -518,6 +529,17 @@ class CameraProcessNode(Node):
         )
         self.point_direction_button.show()
 
+        # --- Move to Table 1 Button ---
+
+        self.move_to_table_button = QtWidgets.QPushButton(self.gui)
+        self.move_to_table_button.setGeometry(QtCore.QRect(1600, 250, 200, 50))
+        self.move_to_table_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.move_to_table_button.setObjectName("table_1_button")
+        self.move_to_table_button.setText("Goto Table 1")
+        self.move_to_table_button.clicked.connect(lambda: self.goto_tag(4)) # Number should be april tag number
+        self.move_to_table_button.show()
+
         # --- Return Object Button ---
         self.return_object_button = QtWidgets.QPushButton(self.gui)
         self.return_object_button.setGeometry(QtCore.QRect(1300, 150, 200, 50))
@@ -645,6 +667,13 @@ class CameraProcessNode(Node):
         self.stow_arm_client.wait_for_server()
         return self.stow_arm_client.send_goal(msg)
 
+    # Input should be the value of the april tag spot will move to
+    def goto_tag(self, tag_number):
+        self.get_logger().info("Attempting to move to April Tag " + tag_number + ".")
+        msg = SendInt.Goal()
+        msg.data = tag_number
+        self.goto_tag_service_client.wait_for_server()
+        self.goto_tag_service_client.send_goal_async(msg)
     def grasp_water(self):
         self.get_logger().info("Called Grasp Water")
         msg_reward = Bool()
