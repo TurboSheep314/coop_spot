@@ -536,7 +536,18 @@ class CameraProcessNode(Node):
         self.move_to_table_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.move_to_table_button.setObjectName("table_1_button")
-        self.move_to_table_button.setText("Goto Table 1")
+        self.move_to_table_button.setText("Goto Table (id:2)")
+        self.move_to_table_button.clicked.connect(lambda: self.goto_tag(2)) # Number should be april tag number
+        self.move_to_table_button.show()
+
+        # --- Move to Table 2 Button ---
+
+        self.move_to_table_button = QtWidgets.QPushButton(self.gui)
+        self.move_to_table_button.setGeometry(QtCore.QRect(1600, 350, 200, 50))
+        self.move_to_table_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.move_to_table_button.setObjectName("table_2_button")
+        self.move_to_table_button.setText("Goto Table (id:4)")
         self.move_to_table_button.clicked.connect(lambda: self.goto_tag(4)) # Number should be april tag number
         self.move_to_table_button.show()
 
@@ -669,7 +680,7 @@ class CameraProcessNode(Node):
 
     # Input should be the value of the april tag spot will move to
     def goto_tag(self, tag_number):
-        self.get_logger().info("Attempting to move to April Tag " + tag_number + ".")
+        self.get_logger().info("Attempting to move to April Tag " + str(tag_number) + ".")
         msg = SendInt.Goal()
         msg.data = tag_number
         self.goto_tag_service_client.wait_for_server()

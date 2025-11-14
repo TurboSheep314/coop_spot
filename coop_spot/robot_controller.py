@@ -844,7 +844,7 @@ class RobotController(Node):
             bbox_id = detections[i]["id"]
             bboxes[bbox_id] = bbox
 
-            self.april_tags[bbox_id] = detections[i], image
+            self.april_tags[bbox_id] = detections[i]["center"], image
 
             # bboxes.append(bbox)
 
@@ -998,50 +998,7 @@ class RobotController(Node):
         grasp.grasp_params.grasp_params_frame_name = VISION_FRAME_NAME
 
         grasp.grasp_params.grasp_palm_to_fingertip = 0.2
-
-    def goto_tag(self, msg):
-        """Use the position of the april tag in vision world frame and command the robot to move to target location"""
-        self.get.logger().info("Entered goto_tag")
-
-        tag = self.april_tags[msg.request.data]
-        source = tag[1]
-
-        (tvec, _, source_name) = self.pixel_coords_to_camera_coords(tag[0]["lb-rb-rt-lt"], self.intrinsics, source)
-
-        vision_tform_fiducial_position = self.compute_fiducial_in_world_frame(tvec)
-        fiducial_rt_world = geometry_pb2.Vec3(x=vision_tform_fiducial_position[0],
-                                              y=vision_tform_fiducial_position[1],
-                                              z=vision_tform_fiducial_position[2])
-
-        
-        # Compute the go-to point (offset by .5m from the fiducial position) and the heading at
-        # this point.
-        self._current_tag_world_pose, self._angle_desired = self.offset_tag_pose(
-            fiducial_rt_world, self._tag_offset)
-
-        #Command the robot to go to the tag in kinematic odometry frame
-        mobility_params = self.set_mobility_params()
-        tag_cmd = RobotCommandBuilder.synchro_se2_trajectory_point_command(
-            goal_x=self._current_tag_world_pose[0], goal_y=self._current_tag_world_pose[1],
-            goal_heading=self._angle_desired, frame_name=VISION_FRAME_NAME, params=mobility_params,
-            body_height=0.0, locomotion_hint=spot_command_pb2.HINT_AUTO)
-        end_time = 5.0
-        if self._movement_on and self._powered_on:
-            #Issue the command to the robot
-            self._robot_command_client.robot_command(lease=None, command=tag_cmd,
-                                                     end_time_secs=time.time() + end_time)
-            # #Feedback to check and wait until the robot is in the desired position or timeout
-            start_time = time.time()
-            current_time = time.time()
-            while (not self.final_state() and current_time - start_time < end_time):
-                time.sleep(.25)
-                current_time = time.time()
-        return
-
-
-        
-
-
+    
 
     def grasp_tag(self, msg):
         """Use the position of the april tag in vision world frame and command the robot to grasp the attach object"""
@@ -1051,7 +1008,7 @@ class RobotController(Node):
 
         image = tag[1]
 
-        pick_vec = geometry_pb2.Vec2(x=tag[0]["center"][0], y=tag[0]["center"][1])
+        pick_vec = geometry_pb2.Vec2(x=tag[0][0], y=tag[0][1])
 
         # Build the proto
         grasp = manipulation_api_pb2.PickObjectInImage(
@@ -1108,6 +1065,48 @@ class RobotController(Node):
         result.success = True
         return result
 
+    def goto_tag(self, msg):
+        """Use the position of the april tag in vision world frame and command the robot."""
+        # Compute the go-to point (offset by .5m from the fiducial position) and the heading at
+        # this point.
+
+        april_tag_id = msg.request.data
+        
+        fiducial_rt_world = self.get_fiducial_rt_world_from_id(april_tag_id)
+
+        self.current_tag_world_pose, self.angle_desired = self.offset_tag_pose(
+            fiducial_rt_world, 0.0
+        )
+
+        # Command the robot to go to the tag in kinematic odometry frame
+        tag_cmd = RobotCommandBuilder.synchro_se2_trajectory_point_command(
+            goal_x=self.current_tag_world_pose[0],
+            goal_y=self.current_tag_world_pose[1],
+            goal_heading=self.angle_desired,
+            frame_name=VISION_FRAME_NAME,
+            body_height=0.0,
+            locomotion_hint=spot_command_pb2.HINT_AUTO,
+        )
+        end_time = 5.0
+        if self.powered_on:
+            self.get_logger().info(
+                f"Goal: {self.current_tag_world_pose[0], self.current_tag_world_pose[1]}"
+            )
+            # Issue the command to the robot
+            self.robot_command_client.robot_command(
+                lease=None, command=tag_cmd, end_time_secs=time.time() + end_time
+            )
+            # #Feedback to check and wait until the robot is in the desired position or timeout
+            start_time = time.time()
+            current_time = time.time()
+            while not self.final_state() and current_time - start_time < end_time:
+                time.sleep(0.25)
+                current_time = time.time()
+        
+        result = SendInt.Result()
+        result.success = True
+        return result
+
     def final_state(self):
         """Check if the current robot state is within range of the fiducial position."""
         robot_state = get_vision_tform_body(
@@ -1121,7 +1120,7 @@ class RobotController(Node):
             if (
                 (x_dist < self.x_eps)
                 and (y_dist < self.y_eps)
-                and (angle < self.angle_eps)
+                and (angle < self.ang_eps)
             ):
                 self.get_logger().info("Robot within range of the fiducial position")
                 return True
@@ -1343,8 +1342,133 @@ class RobotController(Node):
         blocking_stand(self.robot_command_client)
 
         self.get_logger().info("Done with robot setup.")
+    
+    def old_image_to_bounding_box(self, target_id):
+        """Determine which camera source has a fiducial.
+           Return the bounding box of the first detected fiducial."""
+        #Iterate through all five camera sources to check for a fiducial
+        for i in range(len(self.source_names) + 1):
+            # Get the image from the source camera.
+            if i == 0:
+                if self.previous_source is not None:
+                    # Prioritize the camera the fiducial was last detected in.
+                    source_name = self.previous_source
+                else:
+                    continue
+            elif self.source_names[i - 1] == self.previous_source:
+                continue
+            else:
+                source_name = self.source_names[i - 1]
 
+            img_req = build_image_request(source_name, quality_percent=100,
+                                          image_format=image_pb2.Image.FORMAT_RAW)
+            image_response = self.img_client.get_image([img_req])
+            self.camera_tform_body = get_a_tform_b(image_response[0].shot.transforms_snapshot,
+                                                    image_response[0].shot.frame_name_image_sensor,
+                                                    BODY_FRAME_NAME)
+            self.body_tform_world = get_a_tform_b(image_response[0].shot.transforms_snapshot,
+                                                   BODY_FRAME_NAME, VISION_FRAME_NAME)
 
+            # Camera intrinsics for the given source camera.
+            self.intrinsics = image_response[0].source.pinhole.intrinsics
+            width = image_response[0].shot.image.cols
+            height = image_response[0].shot.image.rows
+
+            # detect given fiducial in image and return the bounding box of it
+            bboxes = self.old_detect_fiducial_in_image(image_response[0].shot.image, (width, height),
+                                                   source_name, target_id)
+            if bboxes:
+                print(f'Found bounding box for {source_name}')
+                return bboxes, source_name
+            else:
+                self.tag_not_located = True
+                print(f'Failed to find bounding box for {source_name}')
+        return [], None
+    
+    def old_detect_fiducial_in_image(self, image, dim, source_name, target_id):
+        """Detect the fiducial within a single image and return its bounding box."""
+        image_grey = np.array(
+            Image.frombytes('P', (int(dim[0]), int(dim[1])), data=image.data, decoder_name='raw'))
+
+        #Rotate each image such that it is upright
+        image_grey = self.rotate_image(image_grey, source_name)
+
+        #Make the image greyscale to use bounding box detections
+        detector = apriltag(family='tag36h11')
+        detections = detector.detect(image_grey)
+
+        bboxes = []
+        for i in range(len(detections)):
+            # Draw the bounding box detection in the image.
+            if (detections[i]["id"] != target_id): continue # Only add the bounding box of the target id's fiducial
+            bbox = detections[i]['lb-rb-rt-lt']
+            cv2.polylines(image_grey, [np.int32(bbox)], True, (0, 0, 0), 2)
+            bboxes.append(bbox)
+
+        self.image[source_name] = image_grey
+        return bboxes
+
+    def old_pixel_coords_to_camera_coords(self, bbox, intrinsics, source_name):
+        """Compute transformation of 2d pixel coordinates to 3d camera coordinates."""
+        camera = self.make_camera_matrix(intrinsics)
+        # Track a triplet of (translation vector, rotation vector, camera source name)
+        best_bbox = (None, None, source_name)
+        # The best bounding box is considered the closest to the robot body.
+        closest_dist = float('inf')
+        for i in range(len(bbox)):
+            obj_points, img_points = self.bbox_to_image_object_pts(bbox[i])
+            if self.camera_to_extrinsics_guess[source_name][0]:
+                # initialize the position estimate with the previous extrinsics solution
+                # then iteratively solve for new position
+                old_rvec, old_tvec = self.camera_to_extrinsics_guess[source_name][1]
+                _, rvec, tvec = cv2.solvePnP(obj_points, img_points, camera, np.zeros((5, 1)),
+                                             old_rvec, old_tvec, True, cv2.SOLVEPNP_ITERATIVE)
+            else:
+                # Determine current extrinsic solution for the tag.
+                _, rvec, tvec = cv2.solvePnP(obj_points, img_points, camera, np.zeros((5, 1)))
+
+            # Save extrinsics results to help speed up next attempts to locate bounding box in
+            # the same camera source.
+            self.camera_to_extrinsics_guess[source_name] = (True, (rvec, tvec))
+
+            dist = math.sqrt(float(tvec[0][0])**2 + float(tvec[1][0])**2 +
+                             float(tvec[2][0])**2) / 1000.0
+            if dist < closest_dist:
+                closest_dist = dist
+                best_bbox = (tvec, rvec, source_name)
+
+        # Flag indicating if the best april tag been found/located
+        self.tag_not_located = best_bbox[0] is None and best_bbox[1] is None
+        return best_bbox
+    
+    def old_compute_fiducial_in_world_frame(self, tvec):
+        """Transform the tag position from camera coordinates to world coordinates."""
+        fiducial_rt_camera_frame = np.array(
+            [float(tvec[0][0]) / 1000.0,
+             float(tvec[1][0]) / 1000.0,
+             float(tvec[2][0]) / 1000.0])
+        body_tform_fiducial = (self.camera_tform_body.inverse()).transform_point(
+            fiducial_rt_camera_frame[0], fiducial_rt_camera_frame[1], fiducial_rt_camera_frame[2])
+        fiducial_rt_world = self.body_tform_world.inverse().transform_point(
+            body_tform_fiducial[0], body_tform_fiducial[1], body_tform_fiducial[2])
+        return fiducial_rt_world
+
+    def get_fiducial_rt_world_from_id(self, target_id):
+        fiducial_rt_world = None
+
+        # Detect the april tag in the images from Spot using the apriltag library.
+        bboxes, source_name = self.old_image_to_bounding_box(target_id)
+        if bboxes:
+            self.previous_source = source_name
+            (tvec, _, source_name) = self.old_pixel_coords_to_camera_coords(
+                bboxes, self.intrinsics, source_name)
+            vision_tform_fiducial_position = self.old_compute_fiducial_in_world_frame(tvec)
+            fiducial_rt_world = geometry_pb2.Vec3(x=vision_tform_fiducial_position[0],
+                                                    y=vision_tform_fiducial_position[1],
+                                                    z=vision_tform_fiducial_position[2])
+        
+
+        return fiducial_rt_world
 def grasp_object_callback(self, goal_handle):
     # Provide the position of the goal tag
 
@@ -1789,6 +1913,7 @@ def grasp_object_callback(self, goal_handle):
     result.success = output
 
     return result
+
 
 
 # Main Function
