@@ -195,6 +195,10 @@ class RobotController(Node):
         # Dictionary mapping april tag locations and source
         self.april_tags = dict()
 
+        # Stopping distance (x,y) offset from tag and angle offset from desired angle
+
+        self.tag_offset = float(0.5) + 1.1 / 2.0  # meters
+
         # List of all possible camera sources.
         self.source_names = [
             src.name
@@ -809,13 +813,16 @@ class RobotController(Node):
             bboxes = self.detect_fiducial_in_image(
                 image_response[0], (width, height), source_name
             )
-            if bboxes:
-                self.get_logger().info(f"Found bounding box for {source_name}")
+            #if bboxes:
+                #self.get_logger().info(f"Found bounding box for {source_name}")
                 # return bboxes, source_name
-            else:
-                self.tag_not_located = True
-                self.get_logger().info(f"Failed to find bounding box for {source_name}")
+            #else:
+            #    self.tag_not_located = True
+            #    self.get_logger().info(f"Failed to find bounding box for {source_name}")
         # return [], None
+        if self.april_tags:
+            for key in self.april_tags.keys():
+                self.get_logger().info(f"Found ID: {key}")
         return bboxes, source_name
 
     def detect_fiducial_in_image(self, image, dim, source_name):
@@ -833,7 +840,7 @@ class RobotController(Node):
         detector = apriltag(family="tag36h11")
         detections = detector.detect(image_grey)
 
-        self.get_logger().info(f"{detections}")
+        #self.get_logger().info(f"{detections}")
 
         bboxes = {}
         for i in range(len(detections)):
@@ -1003,7 +1010,7 @@ class RobotController(Node):
     def grasp_tag(self, msg):
         """Use the position of the april tag in vision world frame and command the robot to grasp the attach object"""
         self.get_logger().info("Entered grasp tag")
-
+        self.get_logger().info("List of seen april tags")
         tag = self.april_tags[msg.request.data]
 
         image = tag[1]
@@ -1074,8 +1081,15 @@ class RobotController(Node):
         
         fiducial_rt_world = self.get_fiducial_rt_world_from_id(april_tag_id)
 
+        self.get_logger().info(f"fiducial_rt_world from id {april_tag_id} is {fiducial_rt_world}")
+
+        if fiducial_rt_world == None:
+            result = SendInt.Result()
+            result.success = False
+            return result
+
         self.current_tag_world_pose, self.angle_desired = self.offset_tag_pose(
-            fiducial_rt_world, 0.0
+            fiducial_rt_world, self.tag_offset
         )
 
         # Command the robot to go to the tag in kinematic odometry frame

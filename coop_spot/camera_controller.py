@@ -551,6 +551,25 @@ class CameraProcessNode(Node):
         self.move_to_table_button.clicked.connect(lambda: self.goto_tag(4)) # Number should be april tag number
         self.move_to_table_button.show()
 
+        # --- Move to Custom Table Button ---
+
+        self.move_to_table_button = QtWidgets.QPushButton(self.gui)
+        self.move_to_table_button.setGeometry(QtCore.QRect(1600, 450, 200, 50))
+        self.move_to_table_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.move_to_table_button.setObjectName("table_custom_button")
+        self.move_to_table_button.setText("Goto Table")
+        self.move_to_table_button.clicked.connect(lambda: self.goto_tag(int(self.table_input.text()))) # Number should be april tag number
+        self.move_to_table_button.show()
+
+        self.table_input = QtWidgets.QLineEdit(self.gui)
+        self.table_input.setGeometry(QtCore.QRect(1600, 550, 200, 50))
+        self.table_input.setPlaceholderText("Enter ID")
+        self.table_input.setObjectName("table_input")
+        self.int_validator = QtGui.QIntValidator(0, 100, self.gui)
+        self.table_input.setValidator(self.int_validator)
+        self.move_to_table_button.show()
+
         # --- Return Object Button ---
         self.return_object_button = QtWidgets.QPushButton(self.gui)
         self.return_object_button.setGeometry(QtCore.QRect(1300, 150, 200, 50))
@@ -705,7 +724,7 @@ class CameraProcessNode(Node):
         self.update_robot_reward.publish(msg_reward)
 
         msg = SendInt.Goal()
-        msg.data = 60
+        msg.data = 65
         self.grasp_tag_service_client.wait_for_server()
         self.grasp_tag_service_client.send_goal_async(msg)
 
@@ -735,9 +754,9 @@ class CameraProcessNode(Node):
 
             # Add current detection to dictionary of april tag bounding boxes
             self.bboxes[bbox_id] = bbox
-        self.get_logger().info(
-            f"April tag IDs detected: {apriltag_IDs}", throttle_duration_sec=3
-        )
+        #self.get_logger().info(
+        #    f"April tag IDs detected: {apriltag_IDs}", throttle_duration_sec=3
+        #)
 
         # Update the world state
         for state in self.world_state:
@@ -750,10 +769,10 @@ class CameraProcessNode(Node):
         for state in self.world_state:
             if self.world_state[state]["present"]:
                 current_world_state.append(self.world_state[state]["name"])
-        self.get_logger().info(
-            f"World state: {current_world_state}",
-            throttle_duration_sec=3,
-        )
+        #self.get_logger().info(
+        #    f"World state: {current_world_state}",
+        #    throttle_duration_sec=3,
+        #)
 
     def hypotenuse(self, p1, p2):
         """Calculates the hypotenuse between two points in 2d space."""
@@ -761,7 +780,7 @@ class CameraProcessNode(Node):
 
     def update_image_callback(self):
         """Method is called continuously from a loop, visualizes hand tracking and april tag data"""
-        self.get_logger().info("Running image callback", throttle_duration_sec=3)
+        #self.get_logger().info("Running image callback", throttle_duration_sec=3)
 
         if self.image is not None:
             bridge = CvBridge()
