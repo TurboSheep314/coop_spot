@@ -1004,8 +1004,25 @@ class RobotController(Node):
         self.get_logger().info("Applying grasp constraints")
         grasp.grasp_params.grasp_params_frame_name = VISION_FRAME_NAME
 
-        grasp.grasp_params.grasp_palm_to_fingertip = 0.2
-    
+        grasp.grasp_params.grasp_palm_to_fingertip = 0.6
+
+        #setting top down grasp
+        # The axis on the gripper is the x-axis.
+        axis_on_gripper_ewrt_gripper = geometry_pb2.Vec3(x=1, y=0, z=0)
+
+        # The axis in the vision frame is the negative z-axis
+        axis_to_align_with_ewrt_vo = geometry_pb2.Vec3(x=0, y=0, z=-1)
+
+        # Add the vector constraint to our proto.
+        constraint = grasp.grasp_params.allowable_orientation.add()
+        constraint.vector_alignment_with_tolerance.axis_on_gripper_ewrt_gripper.CopyFrom(
+            axis_on_gripper_ewrt_gripper)
+        constraint.vector_alignment_with_tolerance.axis_to_align_with_ewrt_frame.CopyFrom(
+            axis_to_align_with_ewrt_vo)
+        
+        # We'll take anything within about 10 degrees for top-down or horizontal grasps.
+        constraint.vector_alignment_with_tolerance.threshold_radians = 0.17
+
 
     def grasp_tag(self, msg):
         """Use the position of the april tag in vision world frame and command the robot to grasp the attach object"""
