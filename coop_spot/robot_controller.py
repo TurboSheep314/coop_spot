@@ -52,12 +52,16 @@ from bosdyn.api import (
 )
 from bosdyn.api.geometry_pb2 import SE2Velocity, SE2VelocityLimit, Vec2
 from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
+from bosdyn.api.graph_nav import graph_nav_pb2, map_pb2, nav_pb2
 from bosdyn.client import create_standard_sdk
 from bosdyn.client.lease import LeaseClient, LeaseKeepAlive
+from bosdyn.client.exceptions import ResponseError
 from bosdyn.client.robot_id import RobotIdClient
 from bosdyn.client.power import PowerClient
 from bosdyn.client.image import ImageClient, build_image_request
+from bosdyn.client.graph_nav import GraphNavClient
 from bosdyn.client.robot_state import RobotStateClient
+import coop_spot.graph_nav_util as graph_nav_util
 from bosdyn.client.robot_command import (
     RobotCommandClient,
     RobotCommandBuilder,
@@ -130,6 +134,8 @@ class RobotController(Node):
 
         # Subscriptions/Flags
 
+
+
         # Listen to desired arm pose relative to the body reference frame
         self.desired_arm_body_pose_service = ActionServer(
             self, SendPose, "desired_arm_body_pose", self.desired_arm_body_pose_callback
@@ -158,6 +164,18 @@ class RobotController(Node):
         self.arm_grasp_tag_service = ActionServer(
             self, SendInt, "desired_tag_to_grasp", self.grasp_tag
         )
+
+        # Listen for desired waypoint to move to
+        self.goto_waypoint_service = ActionServer(
+            self, SendInt, "desired_waypoint_to_goto", self.goto_waypoint
+        )
+        # Store the most recent knowledge of the state of the robot based on rpc calls.
+        self._current_graph = None
+        self._current_edges = dict()  #maps to_waypoint to list(from_waypoint)
+        self._current_waypoint_snapshots = dict()  # maps id to waypoint snapshot
+        self._current_edge_snapshots = dict()  # maps id to edge snapshot
+        self._current_annotation_name_to_wp_id = dict()
+        self._upload_filepath = "/home/aicaring/Desktop/graph_folder/downloaded_graph"
 
         # Listen to desired tag to move to
         self.goto_tag_service = ActionServer(
@@ -214,6 +232,8 @@ class RobotController(Node):
 
         # Calibration
         self.calibration_timer = self.create_timer(5, self.calibration_timer_callback)
+
+        self._upload_graph_and_snapshots()
 
     @property
     def robot_state(self):
@@ -1006,23 +1026,6 @@ class RobotController(Node):
 
         grasp.grasp_params.grasp_palm_to_fingertip = 0.6
 
-        #setting top down grasp
-        # The axis on the gripper is the x-axis.
-        axis_on_gripper_ewrt_gripper = geometry_pb2.Vec3(x=1, y=0, z=0)
-
-        # The axis in the vision frame is the negative z-axis
-        axis_to_align_with_ewrt_vo = geometry_pb2.Vec3(x=0, y=0, z=-1)
-
-        # Add the vector constraint to our proto.
-        constraint = grasp.grasp_params.allowable_orientation.add()
-        constraint.vector_alignment_with_tolerance.axis_on_gripper_ewrt_gripper.CopyFrom(
-            axis_on_gripper_ewrt_gripper)
-        constraint.vector_alignment_with_tolerance.axis_to_align_with_ewrt_frame.CopyFrom(
-            axis_to_align_with_ewrt_vo)
-        
-        # We'll take anything within about 10 degrees for top-down or horizontal grasps.
-        constraint.vector_alignment_with_tolerance.threshold_radians = 0.17
-
 
     def grasp_tag(self, msg):
         """Use the position of the april tag in vision world frame and command the robot to grasp the attach object"""
@@ -1086,6 +1089,114 @@ class RobotController(Node):
         self.store_arm_coords()
 
         result = SendInt.Result()
+        result.success = True
+        return result        
+
+    def _upload_graph_and_snapshots(self):
+        """Upload the graph and snapshots to the robot."""
+        print('Loading the graph from disk into local storage...')
+        with open(self._upload_filepath + '/graph', 'rb') as graph_file:
+            # Load the graph from disk.
+            data = graph_file.read()
+            self._current_graph = map_pb2.Graph()
+            self._current_graph.ParseFromString(data)
+            print(
+                f'Loaded graph has {len(self._current_graph.waypoints)} waypoints and {self._current_graph.edges} edges'
+            )
+        for waypoint in self._current_graph.waypoints:
+            # Load the waypoint snapshots from disk.
+            with open(f'{self._upload_filepath}/waypoint_snapshots/{waypoint.snapshot_id}',
+                      'rb') as snapshot_file:
+                waypoint_snapshot = map_pb2.WaypointSnapshot()
+                waypoint_snapshot.ParseFromString(snapshot_file.read())
+                self._current_waypoint_snapshots[waypoint_snapshot.id] = waypoint_snapshot
+        for edge in self._current_graph.edges:
+            if len(edge.snapshot_id) == 0:
+                continue
+            # Load the edge snapshots from disk.
+            with open(f'{self._upload_filepath}/edge_snapshots/{edge.snapshot_id}',
+                      'rb') as snapshot_file:
+                edge_snapshot = map_pb2.EdgeSnapshot()
+                edge_snapshot.ParseFromString(snapshot_file.read())
+                self._current_edge_snapshots[edge_snapshot.id] = edge_snapshot
+        # Upload the graph to the robot.
+        print('Uploading the graph and snapshots to the robot...')
+        true_if_empty = not len(self._current_graph.anchoring.anchors)
+        response = self.graph_nav_client.upload_graph(graph=self._current_graph,
+                                                       generate_new_anchoring=true_if_empty)
+        # Upload the snapshots to the robot.
+        for snapshot_id in response.unknown_waypoint_snapshot_ids:
+            waypoint_snapshot = self._current_waypoint_snapshots[snapshot_id]
+            self.graph_nav_client.upload_waypoint_snapshot(waypoint_snapshot)
+            print(f'Uploaded {waypoint_snapshot.id}')
+        for snapshot_id in response.unknown_edge_snapshot_ids:
+            edge_snapshot = self._current_edge_snapshots[snapshot_id]
+            self.graph_nav_client.upload_edge_snapshot(edge_snapshot)
+            print(f'Uploaded {edge_snapshot.id}')
+
+        # The upload is complete! Check that the robot is localized to the graph,
+        # and if it is not, prompt the user to localize the robot before attempting
+        # any navigation commands.
+        localization_state = self.graph_nav_client.get_localization_state()
+        if not localization_state.localization.waypoint_id:
+            # The robot is not localized to the newly uploaded graph.
+            print('\n')
+            print(
+                'Upload complete! The robot is currently not localized to the map; please localize'
+                ' the robot using commands (2) or (3) before attempting a navigation command.')
+
+    def _check_success(self, command_id=-1):
+        """Use a navigation command id to get feedback from the robot and sit when command succeeds."""
+        if command_id == -1:
+            # No command, so we have no status to check.
+            return False
+        status = self.graph_nav_client.navigation_feedback(command_id)
+        if status.status == graph_nav_pb2.NavigationFeedbackResponse.STATUS_REACHED_GOAL:
+            # Successfully completed the navigation commands!
+            return True
+        elif status.status == graph_nav_pb2.NavigationFeedbackResponse.STATUS_LOST:
+            print('Robot got lost when navigating the route, the robot will now sit down.')
+            return True
+        elif status.status == graph_nav_pb2.NavigationFeedbackResponse.STATUS_STUCK:
+            print('Robot got stuck when navigating the route, the robot will now sit down.')
+            return True
+        elif status.status == graph_nav_pb2.NavigationFeedbackResponse.STATUS_ROBOT_IMPAIRED:
+            print('Robot is impaired.')
+            return True
+        else:
+            # Navigation command is not complete yet.
+            return False
+
+    def goto_waypoint(self, msg):
+        """Navigate to waypoint with NavGraph system."""
+        # Initialize result to return
+        result = SendInt.Result()
+        # Internally, the msg is an integer that indicates which door to move to.
+        waypoint_id = msg.request.data
+
+        # Initializing a list of waypoints id -> shortform
+        waypoints = np.array(["rf", "as"])
+
+        destination_waypoint = graph_nav_util.find_unique_waypoint_id(
+            waypoints[waypoint_id], self._current_graph, self._current_annotation_name_to_wp_id)
+        if not destination_waypoint:
+            # Failed to find the waypoint.
+            result.success = False
+            return result
+        
+        # Time to navigate!
+        nav_to_cmd_id = None
+        is_finished = False
+
+        while not is_finished:
+            try:
+                nav_to_cmd_id = self.graph_nav_client.navigate_to(destination_waypoint, 1.0, command_id=nav_to_cmd_id)
+            except ResponseError as e:
+                self.get_logger().info(f'Error navigating to waypoint {e}')
+                break
+            time.sleep(.5) # Sleep for half a second to allow for command execution
+            is_finished = self._check_success(nav_to_cmd_id)
+        
         result.success = True
         return result
 
@@ -1253,6 +1364,7 @@ class RobotController(Node):
         )
         self.lease_client = self.robot.ensure_client(LeaseClient.default_service_name)
         self.power_client = self.robot.ensure_client(PowerClient.default_service_name)
+        self.graph_nav_client = self.robot.ensure_client(GraphNavClient.default_service_name)
         self.img_client = self.robot.ensure_client(ImageClient.default_service_name)
         self.robot_state_client = self.robot.ensure_client(
             RobotStateClient.default_service_name

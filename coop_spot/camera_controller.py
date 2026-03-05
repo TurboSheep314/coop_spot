@@ -85,9 +85,14 @@ class CameraProcessNode(Node):
             self, SendInt, "desired_tag_to_grasp"
         )
         
-        # Publish what tag to move to to
+        # Publish what tag to move to
         self.goto_tag_service_client = ActionClient(
             self, SendInt, "desired_tag_to_goto"
+        )
+
+        # Publish what waypoint to move to
+        self.goto_waypoint_service_client = ActionClient(
+            self, SendInt, "desired_waypoint_to_goto"
         )
 
         # Publish desired arm pose relative to body reference frame
@@ -536,8 +541,8 @@ class CameraProcessNode(Node):
         self.move_to_table_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.move_to_table_button.setObjectName("table_1_button")
-        self.move_to_table_button.setText("Goto Table (id:2)")
-        self.move_to_table_button.clicked.connect(lambda: self.goto_tag(2)) # Number should be april tag number
+        self.move_to_table_button.setText("Goto Table (Waypoint)")
+        self.move_to_table_button.clicked.connect(lambda: self.goto_waypoint(0)) # Number should be door-1
         self.move_to_table_button.show()
 
         # --- Move to Table 2 Button ---
@@ -697,6 +702,14 @@ class CameraProcessNode(Node):
         self.stow_arm_client.wait_for_server()
         return self.stow_arm_client.send_goal(msg)
 
+    # Input should be the door
+    def goto_waypoint(self, door_number):
+        self.get_logger().info("Attempting to move to door " + str(door_number) + ".")
+        msg = SendInt.Goal()
+        msg.data = door_number
+        self.goto_waypoint_service_client.wait_for_server()
+        self.goto_waypoint_service_client.send_goal_async(msg)
+        
     # Input should be the value of the april tag spot will move to
     def goto_tag(self, tag_number):
         self.get_logger().info("Attempting to move to April Tag " + str(tag_number) + ".")
@@ -704,6 +717,7 @@ class CameraProcessNode(Node):
         msg.data = tag_number
         self.goto_tag_service_client.wait_for_server()
         self.goto_tag_service_client.send_goal_async(msg)
+        
     def grasp_water(self):
         self.get_logger().info("Called Grasp Water")
         msg_reward = Bool()
@@ -717,7 +731,7 @@ class CameraProcessNode(Node):
 
     def grasp_soda(
         self,
-    ):  # righ now this should just do the same thing as soda, just testing button
+    ):  # right now this should just do the same thing as soda, just testing button
         self.get_logger().info("Called Grasp Soda")
         msg_reward = Bool()
         msg_reward.data = False
