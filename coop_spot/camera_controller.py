@@ -3,6 +3,7 @@ import sys
 from threading import Thread
 import math
 import time
+import random
 import os
 
 # ROS
@@ -541,7 +542,7 @@ class CameraProcessNode(Node):
         self.move_to_table_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.move_to_table_button.setObjectName("table_1_button")
-        self.move_to_table_button.setText("Goto Table (Waypoint)")
+        self.move_to_table_button.setText("Goto Waypoint")
         self.move_to_table_button.clicked.connect(lambda: self.goto_waypoint(0)) # Number should be door-1
         self.move_to_table_button.show()
 
@@ -604,6 +605,16 @@ class CameraProcessNode(Node):
         self.deny_button.setText("Deny")
         self.deny_button.clicked.connect(self.denied_obj)
         self.deny_button.show()
+
+        # --- Probabilistic Grasp ---
+        self.prob_grasp_button = QtWidgets.QPushButton(self.gui)
+        self.prob_grasp_button.setGeometry(QtCore.QRect(1300, 550, 200, 50))
+        self.prob_grasp_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.prob_grasp_button.setObjectName("prob_grasp_button")
+        self.prob_grasp_button.setText("Prob Gasp")
+        self.prob_grasp_button.clicked.connect(self.prob_grasp)
+        self.prob_grasp_button.show()
 
     def update_plot(self):
         if self.reward_history.get("UCB"):
@@ -717,7 +728,23 @@ class CameraProcessNode(Node):
         msg.data = tag_number
         self.goto_tag_service_client.wait_for_server()
         self.goto_tag_service_client.send_goal_async(msg)
+    
+    def prob_grasp(self):
+        self.get_logger().info("Called Probabilistic Grasp")
+        msg_reward = Bool()
+        msg_reward.data = True
+        self.update_robot_reward.publish(msg_reward)
         
+        msg = SendInt.Goal()
+
+        tag_choices = [12, 65]
+
+        # Choose which tag randomly
+        msg.data = random.choice(tag_choices)
+        
+        self.grasp_tag_service_client.wait_for_server()
+        self.grasp_tag_service_client.send_goal_async(msg)
+
     def grasp_water(self):
         self.get_logger().info("Called Grasp Water")
         msg_reward = Bool()
