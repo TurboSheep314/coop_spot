@@ -324,7 +324,7 @@ class CameraProcessNode(Node):
         self.desired_arm_body_pose_nc_service_client.wait_for_server()
         self.desired_arm_body_pose_nc_service_client.send_goal_async(msg)
 
-    def spot_hand_off_pos(self):
+    def show_object(self):
         # this moves Spot's arm into the hand off position
 
         # ensures Spot's gripper is closed
@@ -426,23 +426,11 @@ class CameraProcessNode(Node):
         self.window_width = 2000
         self.gui.resize(self.window_width, self.window_height)
 
-        # # Layouts to manage the GUI with grids
-        # self.bottom_row = QtWidgets.QWidget()
-        # self.top_row = = QtWidgets.QWidget()
-        # bottom_row_layout = QtWidgets.QGridLayout()
-        # self.bottom_row.setLayout(bottom_row_layout)
-        # top_row_layout = QtWidgets.QGridLayout()
-        # self.top_row.setLayout(top_row_layout)
-
-        self.veltext = QtWidgets.QLabel(self.gui)
-        self.veltext.setGeometry(QtCore.QRect(100, 500, 1600, 200))
-        self.proxtext = QtWidgets.QLabel(self.gui)
-        self.proxtext.setGeometry(QtCore.QRect(100, 50, 800, 200))
 
         # --- Calibrate Spot Button --- #
 
         self.cali_button = QtWidgets.QPushButton(self.gui)
-        self.cali_button.setGeometry(QtCore.QRect(700, 50, 200, 50))
+        self.cali_button.setGeometry(QtCore.QRect(775, 50, 200, 50))
         self.cali_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.cali_button.setObjectName("cali_button")
@@ -450,29 +438,19 @@ class CameraProcessNode(Node):
         self.cali_button.clicked.connect(self.spot_arm_calibrate_pos)
         self.cali_button.show()
 
-        # --- Grasp Water Spot Button ---
-        self.grasp_water_button = QtWidgets.QPushButton(self.gui)
-        self.grasp_water_button.setGeometry(QtCore.QRect(700, 150, 200, 50))
-        self.grasp_water_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        # --- Stow Arm Button ---
+        self.stow_arm_button = QtWidgets.QPushButton(self.gui)
+        self.stow_arm_button.setGeometry(QtCore.QRect(1025, 50, 200, 50))
+        self.stow_arm_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
-        self.grasp_water_button.setObjectName("grasp_object_button")
-        self.grasp_water_button.setText("Grasp Water")
-        self.grasp_water_button.clicked.connect(self.grasp_water)
-        self.grasp_water_button.show()
-
-        # --- Grasp Soda Spot Button ---
-        self.grasp_soda_button = QtWidgets.QPushButton(self.gui)
-        self.grasp_soda_button.setGeometry(QtCore.QRect(700, 250, 200, 50))
-        self.grasp_soda_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-
-        self.grasp_soda_button.setObjectName("grasp_soda_button")
-        self.grasp_soda_button.setText("Grasp Soda")
-        self.grasp_soda_button.clicked.connect(self.grasp_soda)
-        self.grasp_soda_button.show()
+        self.stow_arm_button.setObjectName("stow_arm_button")
+        self.stow_arm_button.setText("Stow Arm")
+        self.stow_arm_button.clicked.connect(self.stow_arm)
+        self.stow_arm_button.show()
 
         # --- Gripper Open Button ---
         self.gripper_open_button = QtWidgets.QPushButton(self.gui)
-        self.gripper_open_button.setGeometry(QtCore.QRect(1000, 50, 200, 50))
+        self.gripper_open_button.setGeometry(QtCore.QRect(775, 150, 200, 50))
         self.gripper_open_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.gripper_open_button.setObjectName("gripper_open_button")
@@ -482,103 +460,71 @@ class CameraProcessNode(Node):
 
         # --- Gripper Close Button ---
         self.gripper_close_button = QtWidgets.QPushButton(self.gui)
-        self.gripper_close_button.setGeometry(QtCore.QRect(1000, 150, 200, 50))
+        self.gripper_close_button.setGeometry(QtCore.QRect(1025, 150, 200, 50))
         self.gripper_close_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.gripper_close_button.setObjectName("gripper_close_button")
         self.gripper_close_button.setText("Close Gripper")
         self.gripper_close_button.clicked.connect(self.close_gripper)
         self.gripper_close_button.show()
-
-        # --- Stow Arm Button ---
-        self.stow_arm_button = QtWidgets.QPushButton(self.gui)
-        self.stow_arm_button.setGeometry(QtCore.QRect(1000, 250, 200, 50))
-        self.stow_arm_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-
-        self.stow_arm_button.setObjectName("stow_arm_button")
-        self.stow_arm_button.setText("Stow Arm")
-        self.stow_arm_button.clicked.connect(self.stow_arm)
-        self.stow_arm_button.show()
-
-        # --- Hand off object Spot Button ---
-        self.hand_off_button = QtWidgets.QPushButton(self.gui)
-        self.hand_off_button.setGeometry(QtCore.QRect(1300, 50, 200, 50))
-        self.hand_off_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-
-        self.hand_off_button.setObjectName("hand_off_button")
-        self.hand_off_button.setText("Hand Object")
-        self.hand_off_button.clicked.connect(self.spot_hand_off_pos)
-        self.hand_off_button.show()
-
-        # --- Point direction buttons ---
-        self.point_direction_button = QtWidgets.QPushButton(self.gui)
-        self.point_direction_button.setGeometry(QtCore.QRect(1600, 50, 200, 50))
-        self.point_direction_button.setCursor(
-            QtGui.QCursor(QtCore.Qt.PointingHandCursor)
-        )
-        self.point_direction_button.setObjectName("point_left_button")
-        self.point_direction_button.setText("Point left")
-        self.point_direction_button.clicked.connect(
-            lambda: self.point_left_right(direction="left")
-        )
-        self.point_direction_button.show()
-
-        self.point_direction_button = QtWidgets.QPushButton(self.gui)
-        self.point_direction_button.setGeometry(QtCore.QRect(1600, 150, 200, 50))
-        self.point_direction_button.setCursor(
-            QtGui.QCursor(QtCore.Qt.PointingHandCursor)
-        )
-        self.point_direction_button.setObjectName("point_right_button")
-        self.point_direction_button.setText("Point right")
-        self.point_direction_button.clicked.connect(
-            lambda: self.point_left_right(direction="right")
-        )
-        self.point_direction_button.show()
-
+        
         # --- Move to Table 1 Button ---
 
         self.move_to_table_button = QtWidgets.QPushButton(self.gui)
-        self.move_to_table_button.setGeometry(QtCore.QRect(1600, 250, 200, 50))
+        self.move_to_table_button.setGeometry(QtCore.QRect(525, 250, 200, 50))
         self.move_to_table_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.move_to_table_button.setObjectName("table_1_button")
-        self.move_to_table_button.setText("Goto Waypoint")
+        self.move_to_table_button.setText("Goto Table 1")
         self.move_to_table_button.clicked.connect(lambda: self.goto_waypoint(0)) # Number should be door-1
         self.move_to_table_button.show()
 
         # --- Move to Table 2 Button ---
 
         self.move_to_table_button = QtWidgets.QPushButton(self.gui)
-        self.move_to_table_button.setGeometry(QtCore.QRect(1600, 350, 200, 50))
+        self.move_to_table_button.setGeometry(QtCore.QRect(775, 250, 200, 50))
         self.move_to_table_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.move_to_table_button.setObjectName("table_2_button")
-        self.move_to_table_button.setText("Goto Table (id:4)")
-        self.move_to_table_button.clicked.connect(lambda: self.goto_tag(4)) # Number should be april tag number
+        self.move_to_table_button.setText("Goto Table 2")
+        self.move_to_table_button.clicked.connect(lambda: self.goto_waypoint(1)) # Number should be door-1
         self.move_to_table_button.show()
 
-        # --- Move to Custom Table Button ---
+        # --- Move to Table 3 Button ---
 
         self.move_to_table_button = QtWidgets.QPushButton(self.gui)
-        self.move_to_table_button.setGeometry(QtCore.QRect(1600, 450, 200, 50))
+        self.move_to_table_button.setGeometry(QtCore.QRect(1025, 250, 200, 50))
         self.move_to_table_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
-        self.move_to_table_button.setObjectName("table_custom_button")
-        self.move_to_table_button.setText("Goto Table")
-        self.move_to_table_button.clicked.connect(lambda: self.goto_tag(int(self.table_input.text()))) # Number should be april tag number
+        self.move_to_table_button.setObjectName("table_3_button")
+        self.move_to_table_button.setText("Goto Table 3")
+        self.move_to_table_button.clicked.connect(lambda: self.goto_waypoint(2)) # Number should be door-1
         self.move_to_table_button.show()
 
-        self.table_input = QtWidgets.QLineEdit(self.gui)
-        self.table_input.setGeometry(QtCore.QRect(1600, 550, 200, 50))
-        self.table_input.setPlaceholderText("Enter ID")
-        self.table_input.setObjectName("table_input")
-        self.int_validator = QtGui.QIntValidator(0, 100, self.gui)
-        self.table_input.setValidator(self.int_validator)
+        # --- Move to Table 4 Button ---
+
+        self.move_to_table_button = QtWidgets.QPushButton(self.gui)
+        self.move_to_table_button.setGeometry(QtCore.QRect(1275, 250, 200, 50))
+        self.move_to_table_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.move_to_table_button.setObjectName("table_4_button")
+        self.move_to_table_button.setText("Goto Table 4")
+        self.move_to_table_button.clicked.connect(lambda: self.goto_waypoint(3)) # Number should be door-1
         self.move_to_table_button.show()
+
+        # --- Show Object Spot Button ---
+        self.show_obj_button = QtWidgets.QPushButton(self.gui)
+        self.show_obj_button.setGeometry(QtCore.QRect(1750, 50, 200, 50))
+        self.show_obj_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.show_obj_button.setObjectName("show_obj_button")
+        self.show_obj_button.setText("Show Object")
+        self.show_obj_button.clicked.connect(self.show_object)
+        self.show_obj_button.show()
 
         # --- Return Object Button ---
         self.return_object_button = QtWidgets.QPushButton(self.gui)
-        self.return_object_button.setGeometry(QtCore.QRect(1300, 150, 200, 50))
+        self.return_object_button.setGeometry(QtCore.QRect(1750, 150, 200, 50))
         self.return_object_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.return_object_button.setObjectName("return_object_button")
@@ -586,29 +532,9 @@ class CameraProcessNode(Node):
         self.return_object_button.clicked.connect(self.return_obj)
         self.return_object_button.show()
 
-        # --- Accept Button ---
-        self.accept_button = QtWidgets.QPushButton(self.gui)
-        self.accept_button.setGeometry(QtCore.QRect(1300, 250, 200, 50))
-        self.accept_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-
-        self.accept_button.setObjectName("accept_button")
-        self.accept_button.setText("Accept")
-        self.accept_button.clicked.connect(self.accepted_obj)
-        self.accept_button.show()
-
-        # -- Deny Button ---
-        self.deny_button = QtWidgets.QPushButton(self.gui)
-        self.deny_button.setGeometry(QtCore.QRect(1300, 350, 200, 50))
-        self.deny_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-
-        self.deny_button.setObjectName("deny_button")
-        self.deny_button.setText("Deny")
-        self.deny_button.clicked.connect(self.denied_obj)
-        self.deny_button.show()
-
         # --- Probabilistic Grasp ---
         self.prob_grasp_button = QtWidgets.QPushButton(self.gui)
-        self.prob_grasp_button.setGeometry(QtCore.QRect(1300, 550, 200, 50))
+        self.prob_grasp_button.setGeometry(QtCore.QRect(900, 550, 200, 50))
         self.prob_grasp_button.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
         self.prob_grasp_button.setObjectName("prob_grasp_button")
@@ -743,7 +669,15 @@ class CameraProcessNode(Node):
         msg.data = random.choice(tag_choices)
         
         self.grasp_tag_service_client.wait_for_server()
-        self.grasp_tag_service_client.send_goal_async(msg)
+        
+        success = self.grasp_tag_service_client.send_goal(msg)
+
+        if success:
+            self.get_logger().info("Handing off object!")
+            self.show_object()
+        else:
+            self.get_logger().info("Not handing off object!")
+
 
     def grasp_water(self):
         self.get_logger().info("Called Grasp Water")
