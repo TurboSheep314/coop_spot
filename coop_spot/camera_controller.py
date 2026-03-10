@@ -303,18 +303,18 @@ class CameraProcessNode(Node):
         message.header.frame_id = "body"
         message.transform = Transform()
         message.transform.translation = Vector3()
-        message.transform.translation.x = 0.4
-        message.transform.translation.y = 0.0
-        message.transform.translation.z = 0.4
+        message.transform.translation.x = 0.85
+        message.transform.translation.y = -0.045
+        message.transform.translation.z = 0.33
         message.transform.rotation = Quaternion()
         # message.transform.rotation.x = -0.028
         # message.transform.rotation.y = 0.639
         # message.transform.rotation.z = 0.033
         # message.transform.rotation.w = 0.768
-        message.transform.rotation.x = 0.0
-        message.transform.rotation.y = 0.216
-        message.transform.rotation.z = 0.0
-        message.transform.rotation.w = 0.976
+        message.transform.rotation.x = 0.0382
+        message.transform.rotation.y = 0.6080
+        message.transform.rotation.z = -0.0581
+        message.transform.rotation.w = 0.7909
         message.child_frame_id = "hand"
 
         # Send the message to robot_controller
@@ -821,6 +821,7 @@ class CameraProcessNode(Node):
 
     def update_image_callback(self):
         """Method is called continuously from a loop, visualizes hand tracking and april tag data"""
+        return
         #self.get_logger().info("Running image callback", throttle_duration_sec=3)
 
         if self.image is not None:
@@ -990,7 +991,8 @@ class CameraProcessNode(Node):
             self.veltext.show()
             self.proxtext.show()
         else:
-            self.get_logger().info("TRYING TO DISPLAY IMAGE", throttle_duration_sec=1)
+            pass
+            #self.get_logger().info("TRYING TO DISPLAY IMAGE", throttle_duration_sec=1)
         # publish closest tag ID
         # if self.closest_tag is not None:
         #    msg= String()

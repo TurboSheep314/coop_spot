@@ -234,6 +234,7 @@ class RobotController(Node):
         self.calibration_timer = self.create_timer(5, self.calibration_timer_callback)
 
         self._upload_graph_and_snapshots()
+        self._set_initial_localization_fiducial()
 
     @property
     def robot_state(self):
@@ -833,12 +834,8 @@ class RobotController(Node):
             bboxes = self.detect_fiducial_in_image(
                 image_response[0], (width, height), source_name
             )
-            #if bboxes:
-                #self.get_logger().info(f"Found bounding box for {source_name}")
-                # return bboxes, source_name
-            #else:
-            #    self.tag_not_located = True
-            #    self.get_logger().info(f"Failed to find bounding box for {source_name}")
+            
+            
         # return [], None
         if self.april_tags:
             for key in self.april_tags.keys():
@@ -847,14 +844,27 @@ class RobotController(Node):
 
     def detect_fiducial_in_image(self, image, dim, source_name):
         """Detect the fiducial within a single image and return its bounding box."""
-        image_grey = np.array(
-            Image.frombytes(
-                "P",
-                (int(dim[0]), int(dim[1])),
-                data=image.shot.image.data,
-                decoder_name="raw",
+        
+        if (source_name == "hand_color_image"): # This one is in color
+            img = np.frombuffer(image.shot.image.data, dtype=np.uint8)
+
+            img = img.reshape(
+                image.shot.image.rows,
+                image.shot.image.cols,
+                3
             )
-        )
+
+            image_grey = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        else:
+            image_grey = np.array(
+                Image.frombytes(
+                    "P",
+                    (int(dim[0]), int(dim[1])),
+                    data=image.shot.image.data,
+                    decoder_name="raw",
+                )
+            )
+
 
         # Make the image greyscale to use bounding box detections
         detector = apriltag(family="tag36h11")
@@ -1084,13 +1094,25 @@ class RobotController(Node):
             time.sleep(0.25)
 
         self.get_logger().info("Finished grasp.")
-        time.sleep(4.0)
+        time.sleep(1.0) # wait a second before storing the grasp.
 
         self.store_arm_coords()
-
+        self.get_logger().info("Storing grasp coords!")
         result = SendInt.Result()
         result.success = True
-        return result        
+        return result   
+         
+    def _set_initial_localization_fiducial(self):
+        """Trigger localization when near a fiducial."""
+        robot_state = self.robot_state_client.get_robot_state()
+        current_odom_tform_body = get_odom_tform_body(
+            robot_state.kinematic_state.transforms_snapshot).to_proto()
+        # Create an empty instance for initial localization since we are asking it to localize
+        # based on the nearest fiducial.
+        localization = nav_pb2.Localization()
+        self.graph_nav_client.set_localization(initial_guess_localization=localization,
+                                                ko_tform_body=current_odom_tform_body)
+
 
     def _upload_graph_and_snapshots(self):
         """Upload the graph and snapshots to the robot."""
@@ -1175,7 +1197,7 @@ class RobotController(Node):
         waypoint_id = msg.request.data
 
         # Initializing a list of waypoints id -> shortform
-        waypoints = np.array(["rf", "as"])
+        waypoints = np.array(["am", "fc"])
 
         destination_waypoint = graph_nav_util.find_unique_waypoint_id(
             waypoints[waypoint_id], self._current_graph, self._current_annotation_name_to_wp_id)
@@ -1452,7 +1474,7 @@ class RobotController(Node):
         # Camera source which a bounding box was last detected in.
         self.previous_source = None
 
-        self.get_logger().info("LEASES: " + str(self.lease_client.list_leases()))
+        #self.get_logger().info("LEASES: " + str(self.lease_client.list_leases()))
 
         # Try to take lease
         try:
