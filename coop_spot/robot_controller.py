@@ -52,12 +52,16 @@ from bosdyn.api import (
 )
 from bosdyn.api.geometry_pb2 import SE2Velocity, SE2VelocityLimit, Vec2
 from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
+from bosdyn.api.graph_nav import graph_nav_pb2, map_pb2, nav_pb2
 from bosdyn.client import create_standard_sdk
 from bosdyn.client.lease import LeaseClient, LeaseKeepAlive
+from bosdyn.client.exceptions import ResponseError
 from bosdyn.client.robot_id import RobotIdClient
 from bosdyn.client.power import PowerClient
 from bosdyn.client.image import ImageClient, build_image_request
+from bosdyn.client.graph_nav import GraphNavClient
 from bosdyn.client.robot_state import RobotStateClient
+import coop_spot.graph_nav_util as graph_nav_util
 from bosdyn.client.robot_command import (
     RobotCommandClient,
     RobotCommandBuilder,
@@ -130,6 +134,8 @@ class RobotController(Node):
 
         # Subscriptions/Flags
 
+
+
         # Listen to desired arm pose relative to the body reference frame
         self.desired_arm_body_pose_service = ActionServer(
             self, SendPose, "desired_arm_body_pose", self.desired_arm_body_pose_callback
@@ -154,9 +160,26 @@ class RobotController(Node):
             self, SendPose, "desired_arm_tag_pose", self.desired_arm_tag_pose_callback
         )
 
-        # Listen to desired arm pose relative to the april tag reference frame
+        # Listen for desired tag to grasp
         self.arm_grasp_tag_service = ActionServer(
-            self, SendInt, "fiducial_rt_world", self.grasp_tag
+            self, SendInt, "desired_tag_to_grasp", self.grasp_tag
+        )
+
+        # Listen for desired waypoint to move to
+        self.goto_waypoint_service = ActionServer(
+            self, SendInt, "desired_waypoint_to_goto", self.goto_waypoint
+        )
+        # Store the most recent knowledge of the state of the robot based on rpc calls.
+        self._current_graph = None
+        self._current_edges = dict()  #maps to_waypoint to list(from_waypoint)
+        self._current_waypoint_snapshots = dict()  # maps id to waypoint snapshot
+        self._current_edge_snapshots = dict()  # maps id to edge snapshot
+        self._current_annotation_name_to_wp_id = dict()
+        self._upload_filepath = "/home/aicaring/Desktop/graph_folder/downloaded_graph"
+
+        # Listen to desired tag to move to
+        self.goto_tag_service = ActionServer(
+            self, SendInt, "desired_tag_to_goto", self.goto_tag
         )
 
         # Publish any transforms
@@ -190,6 +213,10 @@ class RobotController(Node):
         # Dictionary mapping april tag locations and source
         self.april_tags = dict()
 
+        # Stopping distance (x,y) offset from tag and angle offset from desired angle
+
+        self.tag_offset = float(0.5) + 1.1 / 2.0  # meters
+
         # List of all possible camera sources.
         self.source_names = [
             src.name
@@ -205,6 +232,8 @@ class RobotController(Node):
 
         # Calibration
         self.calibration_timer = self.create_timer(5, self.calibration_timer_callback)
+
+        self._upload_graph_and_snapshots()
 
     @property
     def robot_state(self):
@@ -291,7 +320,7 @@ class RobotController(Node):
                 qy=body_tform_hand.rot.y,
                 qz=body_tform_hand.rot.z,
                 frame_name=BODY_FRAME_NAME,
-                seconds=5,
+                seconds=2,
             )
             arm_command.synchronized_command.arm_command.arm_cartesian_command.max_linear_velocity.value = self.max_arm_lin_vel
             arm_command.synchronized_command.arm_command.arm_cartesian_command.max_angular_velocity.value = self.max_arm_ang_vel
@@ -804,31 +833,43 @@ class RobotController(Node):
             bboxes = self.detect_fiducial_in_image(
                 image_response[0], (width, height), source_name
             )
-            if bboxes:
-                self.get_logger().info(f"Found bounding box for {source_name}")
-                # return bboxes, source_name
-            else:
-                self.tag_not_located = True
-                self.get_logger().info(f"Failed to find bounding box for {source_name}")
+            
+            
         # return [], None
+        if self.april_tags:
+            for key in self.april_tags.keys():
+                self.get_logger().info(f"Found ID: {key}")
         return bboxes, source_name
 
     def detect_fiducial_in_image(self, image, dim, source_name):
         """Detect the fiducial within a single image and return its bounding box."""
-        image_grey = np.array(
-            Image.frombytes(
-                "P",
-                (int(dim[0]), int(dim[1])),
-                data=image.shot.image.data,
-                decoder_name="raw",
+        
+        if (source_name == "hand_color_image"): # This one is in color
+            img = np.frombuffer(image.shot.image.data, dtype=np.uint8)
+
+            img = img.reshape(
+                image.shot.image.rows,
+                image.shot.image.cols,
+                3
             )
-        )
+
+            image_grey = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        else:
+            image_grey = np.array(
+                Image.frombytes(
+                    "P",
+                    (int(dim[0]), int(dim[1])),
+                    data=image.shot.image.data,
+                    decoder_name="raw",
+                )
+            )
+
 
         # Make the image greyscale to use bounding box detections
         detector = apriltag(family="tag36h11")
         detections = detector.detect(image_grey)
 
-        self.get_logger().info(f"{detections}")
+        #self.get_logger().info(f"{detections}")
 
         bboxes = {}
         for i in range(len(detections)):
@@ -992,13 +1033,21 @@ class RobotController(Node):
         self.get_logger().info("Applying grasp constraints")
         grasp.grasp_params.grasp_params_frame_name = VISION_FRAME_NAME
 
-        grasp.grasp_params.grasp_palm_to_fingertip = 0.2
+        grasp.grasp_params.grasp_palm_to_fingertip = 0.6
+
 
     def grasp_tag(self, msg):
         """Use the position of the april tag in vision world frame and command the robot to grasp the attach object"""
         self.get_logger().info("Entered grasp tag")
+        self.get_logger().info("List of seen april tags")
 
-        tag = self.april_tags[msg.request.data]
+        try:
+            tag = self.april_tags[msg.request.data]
+        except KeyError:
+            self.get_logger().error("Could not find tag " + str(msg.request.data) + "!!")
+            result = SendInt.Result()
+            result.success = False
+            return result  
 
         image = tag[1]
 
@@ -1051,20 +1100,153 @@ class RobotController(Node):
             time.sleep(0.25)
 
         self.get_logger().info("Finished grasp.")
-        time.sleep(4.0)
+        time.sleep(1.0) # wait a second before storing the grasp.
 
         self.store_arm_coords()
-
+        self.get_logger().info("Storing grasp coords!")
         result = SendInt.Result()
+        result.success = True
+        return result   
+         
+    def _set_initial_localization_fiducial(self):
+        """Trigger localization when near a fiducial."""
+        robot_state = self.robot_state_client.get_robot_state()
+        current_odom_tform_body = get_odom_tform_body(
+            robot_state.kinematic_state.transforms_snapshot).to_proto()
+        # Create an empty instance for initial localization since we are asking it to localize
+        # based on the nearest fiducial.
+        localization = nav_pb2.Localization()
+        self.graph_nav_client.set_localization(initial_guess_localization=localization,
+                                                ko_tform_body=current_odom_tform_body)
+
+
+    def _upload_graph_and_snapshots(self):
+        """Upload the graph and snapshots to the robot."""
+        print('Loading the graph from disk into local storage...')
+        with open(self._upload_filepath + '/graph', 'rb') as graph_file:
+            # Load the graph from disk.
+            data = graph_file.read()
+            self._current_graph = map_pb2.Graph()
+            self._current_graph.ParseFromString(data)
+            print(
+                f'Loaded graph has {len(self._current_graph.waypoints)} waypoints and {self._current_graph.edges} edges'
+            )
+        for waypoint in self._current_graph.waypoints:
+            # Load the waypoint snapshots from disk.
+            with open(f'{self._upload_filepath}/waypoint_snapshots/{waypoint.snapshot_id}',
+                      'rb') as snapshot_file:
+                waypoint_snapshot = map_pb2.WaypointSnapshot()
+                waypoint_snapshot.ParseFromString(snapshot_file.read())
+                self._current_waypoint_snapshots[waypoint_snapshot.id] = waypoint_snapshot
+        for edge in self._current_graph.edges:
+            if len(edge.snapshot_id) == 0:
+                continue
+            # Load the edge snapshots from disk.
+            with open(f'{self._upload_filepath}/edge_snapshots/{edge.snapshot_id}',
+                      'rb') as snapshot_file:
+                edge_snapshot = map_pb2.EdgeSnapshot()
+                edge_snapshot.ParseFromString(snapshot_file.read())
+                self._current_edge_snapshots[edge_snapshot.id] = edge_snapshot
+        # Upload the graph to the robot.
+        print('Uploading the graph and snapshots to the robot...')
+        true_if_empty = not len(self._current_graph.anchoring.anchors)
+        response = self.graph_nav_client.upload_graph(graph=self._current_graph,
+                                                       generate_new_anchoring=true_if_empty)
+        # Upload the snapshots to the robot.
+        for snapshot_id in response.unknown_waypoint_snapshot_ids:
+            waypoint_snapshot = self._current_waypoint_snapshots[snapshot_id]
+            self.graph_nav_client.upload_waypoint_snapshot(waypoint_snapshot)
+            print(f'Uploaded {waypoint_snapshot.id}')
+        for snapshot_id in response.unknown_edge_snapshot_ids:
+            edge_snapshot = self._current_edge_snapshots[snapshot_id]
+            self.graph_nav_client.upload_edge_snapshot(edge_snapshot)
+            print(f'Uploaded {edge_snapshot.id}')
+
+        # The upload is complete! Check that the robot is localized to the graph,
+        # and if it is not, prompt the user to localize the robot before attempting
+        # any navigation commands.
+        localization_state = self.graph_nav_client.get_localization_state()
+        if not localization_state.localization.waypoint_id:
+            # The robot is not localized to the newly uploaded graph.
+            print('\n')
+            print(
+                'Upload complete! The robot is currently not localized to the map; please localize'
+                ' the robot using commands (2) or (3) before attempting a navigation command.')
+
+    def _check_success(self, command_id=-1):
+        """Use a navigation command id to get feedback from the robot and sit when command succeeds."""
+        if command_id == -1:
+            # No command, so we have no status to check.
+            return False
+        status = self.graph_nav_client.navigation_feedback(command_id)
+        if status.status == graph_nav_pb2.NavigationFeedbackResponse.STATUS_REACHED_GOAL:
+            # Successfully completed the navigation commands!
+            return True
+        elif status.status == graph_nav_pb2.NavigationFeedbackResponse.STATUS_LOST:
+            print('Robot got lost when navigating the route, the robot will now sit down.')
+            return True
+        elif status.status == graph_nav_pb2.NavigationFeedbackResponse.STATUS_STUCK:
+            print('Robot got stuck when navigating the route, the robot will now sit down.')
+            return True
+        elif status.status == graph_nav_pb2.NavigationFeedbackResponse.STATUS_ROBOT_IMPAIRED:
+            print('Robot is impaired.')
+            return True
+        else:
+            # Navigation command is not complete yet.
+            return False
+
+    def goto_waypoint(self, msg):
+        """Navigate to waypoint with NavGraph system."""
+        # Initialize result to return
+        result = SendInt.Result()
+        # Internally, the msg is an integer that indicates which door to move to.
+        waypoint_id = msg.request.data
+
+        # Initializing a list of waypoints id -> shortform
+        # First will be spawn then followed by the doors in sequential order
+        waypoints = np.array(["sr", "ar", "ds"])
+
+        destination_waypoint = graph_nav_util.find_unique_waypoint_id(
+            waypoints[waypoint_id], self._current_graph, self._current_annotation_name_to_wp_id)
+        if not destination_waypoint:
+            # Failed to find the waypoint.
+            result.success = False
+            return result
+        
+        # Time to navigate!
+        nav_to_cmd_id = None
+        is_finished = False
+
+        while not is_finished:
+            try:
+                nav_to_cmd_id = self.graph_nav_client.navigate_to(destination_waypoint, 1.0, command_id=nav_to_cmd_id)
+            except ResponseError as e:
+                self.get_logger().info(f'Error navigating to waypoint {e}')
+                break
+            time.sleep(.5) # Sleep for half a second to allow for command execution
+            is_finished = self._check_success(nav_to_cmd_id)
+        
         result.success = True
         return result
 
-    def go_to_tag(self, fiducial_rt_world):
+    def goto_tag(self, msg):
         """Use the position of the april tag in vision world frame and command the robot."""
         # Compute the go-to point (offset by .5m from the fiducial position) and the heading at
         # this point.
+
+        april_tag_id = msg.request.data
+        
+        fiducial_rt_world = self.get_fiducial_rt_world_from_id(april_tag_id)
+
+        self.get_logger().info(f"fiducial_rt_world from id {april_tag_id} is {fiducial_rt_world}")
+
+        if fiducial_rt_world == None:
+            result = SendInt.Result()
+            result.success = False
+            return result
+
         self.current_tag_world_pose, self.angle_desired = self.offset_tag_pose(
-            fiducial_rt_world, 0.0
+            fiducial_rt_world, self.tag_offset
         )
 
         # Command the robot to go to the tag in kinematic odometry frame
@@ -1091,7 +1273,10 @@ class RobotController(Node):
             while not self.final_state() and current_time - start_time < end_time:
                 time.sleep(0.25)
                 current_time = time.time()
-        return
+        
+        result = SendInt.Result()
+        result.success = True
+        return result
 
     def final_state(self):
         """Check if the current robot state is within range of the fiducial position."""
@@ -1106,7 +1291,7 @@ class RobotController(Node):
             if (
                 (x_dist < self.x_eps)
                 and (y_dist < self.y_eps)
-                and (angle < self.angle_eps)
+                and (angle < self.ang_eps)
             ):
                 self.get_logger().info("Robot within range of the fiducial position")
                 return True
@@ -1208,6 +1393,7 @@ class RobotController(Node):
         )
         self.lease_client = self.robot.ensure_client(LeaseClient.default_service_name)
         self.power_client = self.robot.ensure_client(PowerClient.default_service_name)
+        self.graph_nav_client = self.robot.ensure_client(GraphNavClient.default_service_name)
         self.img_client = self.robot.ensure_client(ImageClient.default_service_name)
         self.robot_state_client = self.robot.ensure_client(
             RobotStateClient.default_service_name
@@ -1295,7 +1481,7 @@ class RobotController(Node):
         # Camera source which a bounding box was last detected in.
         self.previous_source = None
 
-        self.get_logger().info("LEASES: " + str(self.lease_client.list_leases()))
+        #self.get_logger().info("LEASES: " + str(self.lease_client.list_leases()))
 
         # Try to take lease
         try:
@@ -1328,8 +1514,133 @@ class RobotController(Node):
         blocking_stand(self.robot_command_client)
 
         self.get_logger().info("Done with robot setup.")
+    
+    def old_image_to_bounding_box(self, target_id):
+        """Determine which camera source has a fiducial.
+           Return the bounding box of the first detected fiducial."""
+        #Iterate through all five camera sources to check for a fiducial
+        for i in range(len(self.source_names) + 1):
+            # Get the image from the source camera.
+            if i == 0:
+                if self.previous_source is not None:
+                    # Prioritize the camera the fiducial was last detected in.
+                    source_name = self.previous_source
+                else:
+                    continue
+            elif self.source_names[i - 1] == self.previous_source:
+                continue
+            else:
+                source_name = self.source_names[i - 1]
 
+            img_req = build_image_request(source_name, quality_percent=100,
+                                          image_format=image_pb2.Image.FORMAT_RAW)
+            image_response = self.img_client.get_image([img_req])
+            self.camera_tform_body = get_a_tform_b(image_response[0].shot.transforms_snapshot,
+                                                    image_response[0].shot.frame_name_image_sensor,
+                                                    BODY_FRAME_NAME)
+            self.body_tform_world = get_a_tform_b(image_response[0].shot.transforms_snapshot,
+                                                   BODY_FRAME_NAME, VISION_FRAME_NAME)
 
+            # Camera intrinsics for the given source camera.
+            self.intrinsics = image_response[0].source.pinhole.intrinsics
+            width = image_response[0].shot.image.cols
+            height = image_response[0].shot.image.rows
+
+            # detect given fiducial in image and return the bounding box of it
+            bboxes = self.old_detect_fiducial_in_image(image_response[0].shot.image, (width, height),
+                                                   source_name, target_id)
+            if bboxes:
+                print(f'Found bounding box for {source_name}')
+                return bboxes, source_name
+            else:
+                self.tag_not_located = True
+                print(f'Failed to find bounding box for {source_name}')
+        return [], None
+    
+    def old_detect_fiducial_in_image(self, image, dim, source_name, target_id):
+        """Detect the fiducial within a single image and return its bounding box."""
+        image_grey = np.array(
+            Image.frombytes('P', (int(dim[0]), int(dim[1])), data=image.data, decoder_name='raw'))
+
+        #Rotate each image such that it is upright
+        image_grey = self.rotate_image(image_grey, source_name)
+
+        #Make the image greyscale to use bounding box detections
+        detector = apriltag(family='tag36h11')
+        detections = detector.detect(image_grey)
+
+        bboxes = []
+        for i in range(len(detections)):
+            # Draw the bounding box detection in the image.
+            if (detections[i]["id"] != target_id): continue # Only add the bounding box of the target id's fiducial
+            bbox = detections[i]['lb-rb-rt-lt']
+            cv2.polylines(image_grey, [np.int32(bbox)], True, (0, 0, 0), 2)
+            bboxes.append(bbox)
+
+        self.image[source_name] = image_grey
+        return bboxes
+
+    def old_pixel_coords_to_camera_coords(self, bbox, intrinsics, source_name):
+        """Compute transformation of 2d pixel coordinates to 3d camera coordinates."""
+        camera = self.make_camera_matrix(intrinsics)
+        # Track a triplet of (translation vector, rotation vector, camera source name)
+        best_bbox = (None, None, source_name)
+        # The best bounding box is considered the closest to the robot body.
+        closest_dist = float('inf')
+        for i in range(len(bbox)):
+            obj_points, img_points = self.bbox_to_image_object_pts(bbox[i])
+            if self.camera_to_extrinsics_guess[source_name][0]:
+                # initialize the position estimate with the previous extrinsics solution
+                # then iteratively solve for new position
+                old_rvec, old_tvec = self.camera_to_extrinsics_guess[source_name][1]
+                _, rvec, tvec = cv2.solvePnP(obj_points, img_points, camera, np.zeros((5, 1)),
+                                             old_rvec, old_tvec, True, cv2.SOLVEPNP_ITERATIVE)
+            else:
+                # Determine current extrinsic solution for the tag.
+                _, rvec, tvec = cv2.solvePnP(obj_points, img_points, camera, np.zeros((5, 1)))
+
+            # Save extrinsics results to help speed up next attempts to locate bounding box in
+            # the same camera source.
+            self.camera_to_extrinsics_guess[source_name] = (True, (rvec, tvec))
+
+            dist = math.sqrt(float(tvec[0][0])**2 + float(tvec[1][0])**2 +
+                             float(tvec[2][0])**2) / 1000.0
+            if dist < closest_dist:
+                closest_dist = dist
+                best_bbox = (tvec, rvec, source_name)
+
+        # Flag indicating if the best april tag been found/located
+        self.tag_not_located = best_bbox[0] is None and best_bbox[1] is None
+        return best_bbox
+    
+    def old_compute_fiducial_in_world_frame(self, tvec):
+        """Transform the tag position from camera coordinates to world coordinates."""
+        fiducial_rt_camera_frame = np.array(
+            [float(tvec[0][0]) / 1000.0,
+             float(tvec[1][0]) / 1000.0,
+             float(tvec[2][0]) / 1000.0])
+        body_tform_fiducial = (self.camera_tform_body.inverse()).transform_point(
+            fiducial_rt_camera_frame[0], fiducial_rt_camera_frame[1], fiducial_rt_camera_frame[2])
+        fiducial_rt_world = self.body_tform_world.inverse().transform_point(
+            body_tform_fiducial[0], body_tform_fiducial[1], body_tform_fiducial[2])
+        return fiducial_rt_world
+
+    def get_fiducial_rt_world_from_id(self, target_id):
+        fiducial_rt_world = None
+
+        # Detect the april tag in the images from Spot using the apriltag library.
+        bboxes, source_name = self.old_image_to_bounding_box(target_id)
+        if bboxes:
+            self.previous_source = source_name
+            (tvec, _, source_name) = self.old_pixel_coords_to_camera_coords(
+                bboxes, self.intrinsics, source_name)
+            vision_tform_fiducial_position = self.old_compute_fiducial_in_world_frame(tvec)
+            fiducial_rt_world = geometry_pb2.Vec3(x=vision_tform_fiducial_position[0],
+                                                    y=vision_tform_fiducial_position[1],
+                                                    z=vision_tform_fiducial_position[2])
+        
+
+        return fiducial_rt_world
 def grasp_object_callback(self, goal_handle):
     # Provide the position of the goal tag
 
@@ -1774,6 +2085,7 @@ def grasp_object_callback(self, goal_handle):
     result.success = output
 
     return result
+
 
 
 # Main Function
