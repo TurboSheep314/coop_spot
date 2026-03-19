@@ -234,7 +234,6 @@ class RobotController(Node):
         self.calibration_timer = self.create_timer(5, self.calibration_timer_callback)
 
         self._upload_graph_and_snapshots()
-        self._set_initial_localization_fiducial()
 
     @property
     def robot_state(self):
@@ -321,7 +320,7 @@ class RobotController(Node):
                 qy=body_tform_hand.rot.y,
                 qz=body_tform_hand.rot.z,
                 frame_name=BODY_FRAME_NAME,
-                seconds=5,
+                seconds=2,
             )
             arm_command.synchronized_command.arm_command.arm_cartesian_command.max_linear_velocity.value = self.max_arm_lin_vel
             arm_command.synchronized_command.arm_command.arm_cartesian_command.max_angular_velocity.value = self.max_arm_ang_vel
@@ -1041,7 +1040,14 @@ class RobotController(Node):
         """Use the position of the april tag in vision world frame and command the robot to grasp the attach object"""
         self.get_logger().info("Entered grasp tag")
         self.get_logger().info("List of seen april tags")
-        tag = self.april_tags[msg.request.data]
+
+        try:
+            tag = self.april_tags[msg.request.data]
+        except KeyError:
+            self.get_logger().error("Could not find tag " + str(msg.request.data) + "!!")
+            result = SendInt.Result()
+            result.success = False
+            return result  
 
         image = tag[1]
 
@@ -1197,7 +1203,8 @@ class RobotController(Node):
         waypoint_id = msg.request.data
 
         # Initializing a list of waypoints id -> shortform
-        waypoints = np.array(["am", "fc"])
+        # First will be spawn then followed by the doors in sequential order
+        waypoints = np.array(["sr", "ar", "ds"])
 
         destination_waypoint = graph_nav_util.find_unique_waypoint_id(
             waypoints[waypoint_id], self._current_graph, self._current_annotation_name_to_wp_id)
