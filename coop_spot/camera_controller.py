@@ -12,7 +12,7 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from sensor_msgs.msg import CompressedImage, Joy
 from rclpy.executors import MultiThreadedExecutor
-from std_msgs.msg import Header, Bool, Float64MultiArray
+from std_msgs.msg import Empty, Int32, Header, Bool, Float64MultiArray
 from geometry_msgs.msg import (
     TransformStamped,
     Transform,
@@ -123,8 +123,6 @@ class CameraProcessNode(Node):
             self, GraspObject, "grasp_object"
         )
 
-     
-
         # Publish desired body pose relative to previous body reference frame
         self.desired_body_pose_service_client = ActionClient(
             self, SendPose, "desired_body_pose"
@@ -140,23 +138,15 @@ class CameraProcessNode(Node):
         self.return_obj_client = ActionClient(self, SendBool, "return_obj")
 
 
-        # Publishers for the MUAB
-
-        self.update_human_reward = self.create_publisher(Bool, "human_reward", 10)
-        self.update_robot_reward = self.create_publisher(Bool, "robot_reward", 10)
-
-        # Reward history
-        self.reward_history = {}
-        self.create_subscription(
-            Float64MultiArray, "/reward_history_boltzmann", self.boltzmann_callback, 10
-        )
-        self.create_subscription(
-            Float64MultiArray, "/reward_history_ucb", self.ucb_callback, 10
-        )
-        self.create_subscription(
-            Float64MultiArray, "/reward_history_human", self.human_callback, 10
-        )
-
+        # Publishers/Subscribers for the MAB
+        
+        self.start_experiment = self.create_publisher(Empty, "/start_experiment", 10)
+        self.stop_experiment = self.create_publisher(Empty, "/stop_experiment", 10)
+        self.reset_experiment = self.create_publisher(Empty, "/reset_experiment", 10)
+        self.move_to_next_ucb_bucket = self.create_publisher(Empty, "/move_to_next_ucb_bucket", 10)
+        self.bandit_reward = self.create_publisher(Int32, "/bandit_reward", 10)
+        self.ucb_selected_bucket = self.create_subscription(Int32, "/ucb_selected_bucket", self.waypoint_sub_handler, 10)
+        
         # GUI Intialization
         self.gui = QMainWindow()
         self.initGUI()
@@ -165,6 +155,10 @@ class CameraProcessNode(Node):
         # Game setup:
         self.recommendations = {1:False, 2:False, 3:False, 4:False}
         self.stored_scores = list()
+
+        # Final step, start experiment!
+        msg = Empty()
+        self.start_experiment.publish(msg)
 
     def boltzmann_callback(self, msg):
         self.reward_history["Boltzmann"] = msg.data
@@ -334,33 +328,32 @@ class CameraProcessNode(Node):
         self.create_button("prob_grasp_button", "Prob Grasp", QtCore.QRect(900, 550, 200, 50), self.prob_grasp)
 
         # --- Game Flow ---
-        self.create_button("recc_door_button", "Travel to Recommended", QtCore.QRect(800, 650, 400, 50), self.travel_to_recommended)
-        self.create_button("random_door_button", "Travel to Random Door", QtCore.QRect(800, 750, 400, 50), self.travel_to_random)
+        self.create_button("recc_bucket_button", "Travel to Recommended", QtCore.QRect(800, 650, 400, 50), self.travel_to_recommended)
+        self.create_button("random_bucket_button", "Travel to Random Bucket", QtCore.QRect(800, 750, 400, 50), self.travel_to_random)
         
         self.create_button("accept_button", "Accept", QtCore.QRect(775, 850, 200, 50), self.accepted_obj)
         self.create_button("deny_button", "Decline", QtCore.QRect(1025, 850, 200, 50), self.denied_obj)
 
     def travel_to_random(self):
-        # Choose door randomly
-        door = random.choice(list(self.recommendations.keys()))
-        self.get_logger().info("Travelling to door " + str(door))
-        self.goto_waypoint(door)
+        # Choose bucket randomly
+        bucket = random.choice(list(self.recommendations.keys()))
+        self.get_logger().info("Travelling to bucket " + str(bucket))
+        self.goto_waypoint(bucket)
 
     def travel_to_recommended(self):
-        remaining_doors = list()
-        for key in self.recommendations.keys():
-            if not self.recommendations[key]: # Has yet to be explored.
-                remaining_doors.append(key)
+        # remaining_buckets = list()
+        # for key in self.recommendations.keys():
+        #     if not self.recommendations[key]: # Has yet to be explored.
+        #         remaining_buckets.append(key)
         
-        self.get_logger().info("Unexplored doors: " + str(remaining_doors))
+        # self.get_logger().info("Unexplored buckets: " + str(remaining_buckets))
 
-        # Choose door randomly from remaining options.
-        door = random.choice(remaining_doors)
-        self.get_logger().info("Travelling to door " + str(door))
-        self.goto_waypoint(door)
+        # # Choose bucket randomly from remaining options.
+        # bucket = random.choice(remaining_buckets)
+        self.move_to_next_ucb_bucket.publish(Empty())
 
-        # Set door as explored
-        self.recommendations[door] = True
+        # # Set bucket as explored
+        # self.recommendations[bucket] = True
 
     def create_button(self, name : str, text : str, dim : QtCore.QRect, func):
         self.temp = QtWidgets.QPushButton(self.gui)
@@ -469,11 +462,15 @@ class CameraProcessNode(Node):
         self.stow_arm_client.wait_for_server()
         return self.stow_arm_client.send_goal(msg)
 
-    # Input should be the door, 0 is start!
-    def goto_waypoint(self, door_number):
-        self.get_logger().info("Attempting to move to door " + str(door_number) + ".")
+    def waypoint_sub_handler(self, msg):
+        bucket_number = msg.data
+        self.goto_waypoint(bucket_number+1)
+
+    # Input should be the bucket, 0 is start!
+    def goto_waypoint(self, bucket_number):
+        self.get_logger().info("Attempting to move to bucket " + str(bucket_number) + ".")
         msg = SendInt.Goal()
-        msg.data = door_number
+        msg.data = bucket_number
         self.goto_waypoint_service_client.wait_for_server()
         self.goto_waypoint_service_client.send_goal_async(msg)
         
@@ -487,20 +484,23 @@ class CameraProcessNode(Node):
     
     def prob_grasp(self):
         self.get_logger().info("Called Probabilistic Grasp")
-        msg_reward = Bool()
-        msg_reward.data = True
-        self.update_robot_reward.publish(msg_reward)
         
         msg = SendInt.Goal()
 
-        tag_choices = [12, 65]
+        tag_choices = [43, 65]
 
         # Choose which tag randomly
-        msg.data = random.choice(tag_choices)
+        random_index = random.randint(0, 1)
+        msg.data = tag_choices[random_index]
         
         self.grasp_tag_service_client.wait_for_server()
         
         returned_msg = self.grasp_tag_service_client.send_goal(msg)
+
+        # Send information to MAB algorithm (move to success later)
+        msg = Int32()
+        msg.data = random_index
+        self.bandit_reward.publish(msg)
         
         if returned_msg.result.success: # If grasp was successful
             self.get_logger().info("Handing off object!")
@@ -514,9 +514,6 @@ class CameraProcessNode(Node):
 
     def grasp_water(self):
         self.get_logger().info("Called Grasp Water")
-        msg_reward = Bool()
-        msg_reward.data = True
-        self.update_robot_reward.publish(msg_reward)
 
         msg = SendInt.Goal()
         msg.data = 58
@@ -527,9 +524,6 @@ class CameraProcessNode(Node):
         self,
     ):  # right now this should just do the same thing as soda, just testing button
         self.get_logger().info("Called Grasp Soda")
-        msg_reward = Bool()
-        msg_reward.data = False
-        self.update_robot_reward.publish(msg_reward)
 
         msg = SendInt.Goal()
         msg.data = 65

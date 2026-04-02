@@ -27,14 +27,20 @@ def generate_launch_description():
                 output="screen",
                 emulate_tty=True,
             ),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(
-                        get_package_share_directory("zed_wrapper"),
-                        "launch/zed_camera.launch.py",
-                    )
-                ),
-                launch_arguments={"camera_model": "zed2"}.items(),
-            ),
+            Node(
+                package="mab_ucb_bandit",
+                executable="ucb_bandit_node",
+                output="screen",
+                emulate_tty=True,
+            )
+            # IncludeLaunchDescription(
+            #     PythonLaunchDescriptionSource(
+            #         os.path.join(
+            #             get_package_share_directory("zed_wrapper"),
+            #             "launch/zed_camera.launch.py",
+            #         )
+            #     ),
+            #     launch_arguments={"camera_model": "zed2"}.items(),
+            # ),
         ]
     )
