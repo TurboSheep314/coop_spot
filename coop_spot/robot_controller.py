@@ -1065,7 +1065,7 @@ class RobotController(Node):
         """Trigger localization to a waypoint."""
         
         destination_waypoint = graph_nav_util.find_unique_waypoint_id(
-            id[0], self._current_graph, self._current_annotation_name_to_wp_id)
+            id, self._current_graph, self._current_annotation_name_to_wp_id)
         if not destination_waypoint:
             # Failed to find the unique waypoint id.
             self.get_logger().error("Couldn't find waypoint ID for localization!!")
@@ -1139,7 +1139,7 @@ class RobotController(Node):
             print(
                 'Upload complete! The robot is currently not localized to the map; Localizing now...')
             
-            self.set_initial_localization_waypoint("sw")
+            self.set_initial_localization_waypoint("starry-wrasse-tQMTL9T2LH+dMgN5VgQXEQ==")
 
 
     def _check_success(self, command_id=-1):

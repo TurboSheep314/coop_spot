@@ -81,6 +81,7 @@ class CameraProcessNode(Node):
 
     def __init__(self):
         super().__init__("camera_node")
+        self.declare_parameter("arm_probabilities", [0.9, 0.7, 0.5, 0.3])
         # PUBLISHERS
         self.grasp_tag_service_client = ActionClient(
             self, SendInt, "desired_tag_to_grasp"
@@ -155,6 +156,8 @@ class CameraProcessNode(Node):
         # Game setup:
         self.recommendations = {1:False, 2:False, 3:False, 4:False}
         self.stored_scores = list()
+        self.bucket_probabilities = self.get_parameter("arm_probabilities").value
+        self.current_bucket = 0
 
         # Final step, start experiment!
         msg = Empty()
@@ -469,6 +472,7 @@ class CameraProcessNode(Node):
     # Input should be the bucket, 0 is start!
     def goto_waypoint(self, bucket_number):
         self.get_logger().info("Attempting to move to bucket " + str(bucket_number) + ".")
+        self.current_bucket = bucket_number-1 # table 1 = 0, spawn = -1
         msg = SendInt.Goal()
         msg.data = bucket_number
         self.goto_waypoint_service_client.wait_for_server()
@@ -484,14 +488,25 @@ class CameraProcessNode(Node):
     
     def prob_grasp(self):
         self.get_logger().info("Called Probabilistic Grasp")
+        if (self.current_bucket < 0):
+            self.get_logger().error("CALLING GRASP FROM SPAWN")
+            return
         
         msg = SendInt.Goal()
 
         tag_choices = [43, 65]
 
         # Choose which tag randomly
-        random_index = random.randint(0, 1)
-        msg.data = tag_choices[random_index]
+        weights = [self.bucket_probabilities[self.current_bucket], 1-self.bucket_probabilities[self.current_bucket]]
+        random_tag = random.choices(tag_choices, weights)[0]
+        random_index = -1 # if -1, error
+        if (random_tag == 43): 
+            random_index = 0 
+        else: 
+            random_index = 1
+
+        self.get_logger().info(f"Grabbing {random_tag} tag with a probability of {abs(random_index - self.bucket_probabilities[self.current_bucket])} [Random Index was determined to be {random_index}]")
+        msg.data = random_tag
         
         self.grasp_tag_service_client.wait_for_server()
         
